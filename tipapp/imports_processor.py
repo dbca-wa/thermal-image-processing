@@ -38,6 +38,7 @@ class ImportsProcessor():
                     try:
                         script_path = os.path.join(BASE_DIR, 'thermalimageprocessing/thermal_image_processing.sh')
                         dest_path = os.path.join(BASE_DIR, self.dest_path)
+                        dest_path = os.path.normpath(dest_path)
                         logger.info("Destination folder "+str(dest_path))
                         result = subprocess.run(["/bin/bash", script_path, entry.path, dest_path], capture_output=True, text=True, check=True)
                         logger.info(result)
