@@ -24,7 +24,12 @@ timestamp=$(date +"%Y-%m-%d_%H:%M:%S")
 printf "\n%s filename: %s" "$timestamp" "$filename" >> "$LOG_FILE"
 #if [[ $filename == *.7z ]]; then
 
-dirname="${basename_filename%.*}"
+#dirname="${basename_filename%.*}"
+# First, remove the file extension (e.g., .7z)
+temp_dirname="${basename_filename%.*}"
+# Next, remove the timestamp suffix added during the upload process (e.g., .20251125_110724)
+dirname="${temp_dirname%.*}"
+
 printf "\ndirname: $dirname" >> "$LOG_FILE"
 sleep 10
 echo "STARTING"
