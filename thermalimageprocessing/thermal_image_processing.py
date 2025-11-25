@@ -301,9 +301,18 @@ def publish_image_on_geoserver(flight_name, image_name=None):
 
 ##############################################################################
 # MAIN PROCESS In response to new zipfile in source folder, create destination folder
-flight_name = sys.argv[1]
+# flight_name = sys.argv[1]
+# flight_timestamp = flight_name.replace("FireFlight_", "")
+# main_folder = os.path.join(dest_folder, flight_name)
+
+# Argument is now the full path, e.g., /data/.../FireFlight_2024...
+flight_path_arg = sys.argv[1]
+# Extract just the folder name (FireFlight_...)
+flight_name = os.path.basename(flight_path_arg)
 flight_timestamp = flight_name.replace("FireFlight_", "")
-main_folder = os.path.join(dest_folder, flight_name)
+# The argument passed is already the main folder path
+main_folder = flight_path_arg
+
 # Set filepaths and a couple of other settings
 raw_img_folder = os.path.join(main_folder, "PNGs/CAMERA1")
 output_folder = os.path.join(main_folder, "Processed")
