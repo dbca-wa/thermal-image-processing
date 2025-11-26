@@ -190,6 +190,10 @@ def push_to_azure(img_file, blob_name):
         # Copy the image file to the destination
         shutil.copy2(img_file, dest_path)
         
+        # FIX: Change file permissions to 644 (Owner: RW, Group: R, Others: R)
+        # This ensures the GeoServer container can read the file.
+        os.chmod(dest_path, 0o644)
+        
     except Exception as e:
         print(f"Failed to copy file to rclone mount: {str(e)}")
 
