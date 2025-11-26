@@ -1,5 +1,3 @@
-
-
 # Third-Party
 import os
 import logging
@@ -21,7 +19,7 @@ class ImportsProcessor():
         
         current_datetime = datetime.now().astimezone()
         seen_datetime = datetime.strftime(current_datetime, '%Y-%m-%d %H:%M:%S')
-        BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(settings.__file__))))
+        BASE_DIR = settings.BASE_DIR
         try:
             if (not os.path.isabs(self.path)):
                 self.path = os.path.join(BASE_DIR, self.path)
@@ -34,17 +32,25 @@ class ImportsProcessor():
                 # log watch
                 logger.info (seen_datetime+" File to be processed: "+ str(entry.path))   
 
-                two_char_extension = str(filename)[-3:]
-                three_char_extension = str(filename)[-4:]
-                if two_char_extension == '.7z' or three_char_extension == '.zip':
+                # Case-insensitive check
+                lower_filename = filename.lower()
+                if lower_filename.endswith('.7z') or lower_filename.endswith('.zip'):
                     try:
                         script_path = os.path.join(BASE_DIR, 'thermalimageprocessing/thermal_image_processing.sh')
                         dest_path = os.path.join(BASE_DIR, self.dest_path)
+                        dest_path = os.path.normpath(dest_path)
                         logger.info("Destination folder "+str(dest_path))
                         result = subprocess.run(["/bin/bash", script_path, entry.path, dest_path], capture_output=True, text=True, check=True)
-                        logger.info(result)
+                        if result.stdout:
+                            logger.info("--- STDOUT ---\n" + result.stdout)
+                        if result.stderr:
+                            logger.error("--- STDERR ---\n" + result.stderr)
+                    except subprocess.CalledProcessError as e:
+                        # Capture specific error output from the subprocess
+                        logger.error(f"Command failed with return code {e.returncode}")
+                        logger.error(f"Stdout: {e.stdout}")
+                        logger.error(f"Stderr: {e.stderr}") 
                     except Exception as e:
-                        logger.info (e)
-                        logger.info (e.output)
+                        logger.error(f"Unexpected error: {e}")
         except Exception as e:
             logger.error(e)

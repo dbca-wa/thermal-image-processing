@@ -5,10 +5,13 @@ import subprocess
 import sys
 import requests
 import time
+import decouple
+import logging
 #import gdal
 from osgeo import gdal
 import gdal_merge
 import gdal_edit
+import fiona
 from osgeo import ogr
 import geopandas as gpd
 import pandas as pd
@@ -18,6 +21,15 @@ from sqlalchemy import create_engine
 from postmarker.core import PostmarkClient
 from azure.storage.blob import BlobServiceClient, BlobClient, ContainerClient
 
+logger = logging.getLogger(__name__)
+
+# Enable GDAL exceptions to catch errors like disk space failure in Python try-except blocks
+gdal.UseExceptions()
+# Disable disk space check to prevent "ERROR 3" (Not recommended for production but fixes the immediate issue)
+gdal.SetConfigOption('CHECK_DISK_FREE_SPACE', 'FALSE')
+# FIX: Automatically close open polygons in KML files to prevent "LinearRing do not form a closed linestring" error
+gdal.SetConfigOption('OGR_GEOMETRY_ACCEPT_UNCLOSED_RING', 'YES')
+
 # print(os.environ.get('KEY_THAT_MIGHT_EXIST', default_value))
 # os.environ.get('') #
 # Settings, could go to config file if neeeded
@@ -25,14 +37,25 @@ from azure.storage.blob import BlobServiceClient, BlobClient, ContainerClient
 #config.read(os.path.join(os.path.dirname(__file__),'config.cfg'))
 input_image_file_ext = ".png"
 output_image_file_ext = ".tif"
+
 source_folder = os.environ.get('thermal_source_folder') #"/data/data/projects/thermal-image-processing/thermalimageprocessing/thermal_data"
 dest_folder = os.environ.get('thermal_destination_folder') #"/data/data/projects/thermal-image-processing/thermalimageprocessing/thermal_data_processing"
-postgis_table = os.environ.get('general_postgis_table') #config.get('general', 'postgis_table')
-azure_conn_string = os.environ.get('general_azure_conn_string') # config.get('general', 'azure_conn_string') 
+
+raw_url = decouple.config("general_postgis_table", default="NO DATABASE URL FOUND FOR THERMAL IMAGE PROCESSING.")
+if raw_url:
+    # SQLAlchemy requires 'postgresql://' protocol, but Django often uses 'postgis://'.
+    # Replace 'postgis://' with 'postgresql://' to avoid NoSuchModuleError.
+    postgis_table = raw_url.replace('postgis://', 'postgresql://')
+else:
+    print("ERROR: general_postgis_table environment variable is not set.")
+    sys.exit(1) 
+
+logger.debug(f'postgis_table: {postgis_table}')
+# azure_conn_string = os.environ.get('general_azure_conn_string') # config.get('general', 'azure_conn_string') 
 container_name = os.environ.get('general_container_name') # config.get('general', 'container_name')
-blob_service_client = BlobServiceClient.from_connection_string(azure_conn_string)
+# blob_service_client = BlobServiceClient.from_connection_string(azure_conn_string)
 districts_dataset_name = os.environ.get('general_districts_dataset_name') # config.get('general', 'districts_dataset_name')
-districts_gpkg = os.path.join(os.path.dirname(__file__),districts_dataset_name)
+districts_gpkg = os.path.join(os.path.dirname(__file__), districts_dataset_name)
 districts_layer_name = os.environ.get('general_districts_layer_name') #config.get('general', 'districts_layer_name')
 user = os.environ.get('geoserver_user') #config.get('geoserver', 'user')
 gs_pwd = os.environ.get('geoserver_password') #config.get('geoserver', 'gs_pwd')
@@ -102,15 +125,38 @@ def get_exclude_first(files):
     return exclude_first
 
 def merge(files):
-    # Merges pngs and saves output to output_image specified above
-    gdal_merge_args = ["", "-o", mosaic_image, "-of", "GTiff", "-n", "0", "-a_nodata", "0"]
-    for file in files:
-        gdal_merge_args.append(file)
-    gdal_merge.main(gdal_merge_args)
+    print('in merge()...')
+
+    # # Merges pngs and saves output to output_image specified above
+    # gdal_merge_args = ["", "-o", mosaic_image, "-of", "GTiff", "-n", "0", "-a_nodata", "0"]
+    # for file in files:
+    #     gdal_merge_args.append(file)
+    # gdal_merge.main(gdal_merge_args)
+    # gdal_edit_args = ["", "-a_srs", "EPSG:28350", mosaic_image]
+    # #gdal_edit_args = ["", "-a_srs", "EPSG:4326", mosaic_image]
+    # gdal_edit.main(gdal_edit_args) # creates output image in 'Processed' folder
+    # #push_to_azure(mosaic_image, flight_name + ".tif")
+
+    # Merges PNGs and saves the output to the specified mosaic_image path.
+    # Using gdal.Warp instead of gdal_merge.main ensures better compatibility 
+    # between different GDAL versions (e.g., 3.0 vs 3.8) and offers better performance.
+    try:
+        gdal.Warp(
+            mosaic_image,       # Output file path
+            files,              # List of input files
+            format="GTiff",
+            srcNodata=0,        # Equivalent to -n 0
+            dstNodata=0,         # Equivalent to -a_nodata 0
+            options=["-co", "COMPRESS=DEFLATE"] # Compresses the output to save disk space
+        )
+    except Exception as e:
+        print(f"Merge failed: {e}")
+        raise
+
+    # Assign the projection (EPSG:28350) to the output image
     gdal_edit_args = ["", "-a_srs", "EPSG:28350", mosaic_image]
-    #gdal_edit_args = ["", "-a_srs", "EPSG:4326", mosaic_image]
-    gdal_edit.main(gdal_edit_args) # creates output image in 'Processed' folder
-    #push_to_azure(mosaic_image, flight_name + ".tif")
+    # gdal_edit_args = ["", "-a_srs", "EPSG:4326", mosaic_image]
+    gdal_edit.main(gdal_edit_args)
 
 def translate_png2tif(input_png, short_file):
     # Translates png to tif
@@ -123,11 +169,34 @@ def translate_png2tif(input_png, short_file):
 
 def push_to_azure(img_file, blob_name):
     try:
-        blob_client = blob_service_client.get_blob_client(container=container_name, blob=blob_name)
-        with open(img_file, "rb") as data:
-            blob_client.upload_blob(data)
+        # blob_client = blob_service_client.get_blob_client(container=container_name, blob=blob_name)
+        # with open(img_file, "rb") as data:
+        #     blob_client.upload_blob(data)
+
+        # Define the target base path
+        mount_base_path = "/rclone-mounts/thermalimaging-flightmosaics"
+        
+        # Construct the full destination path
+        # blob_name is used here as the relative path (e.g., 'FlightName.tif' or 'FlightName_images/xxx.tif')
+        dest_path = os.path.join(mount_base_path, blob_name)
+        
+        # Extract the directory path
+        dest_dir = os.path.dirname(dest_path)
+        
+        # Create the directory if it does not exist
+        if not os.path.exists(dest_dir):
+            os.makedirs(dest_dir, exist_ok=True)
+        
+        # Copy the image file to the destination
+        shutil.copy2(img_file, dest_path)
+        
+        # FIX: Change file permissions to 644 (Owner: RW, Group: R, Others: R)
+        # This ensures the GeoServer container can read the file.
+        os.chmod(dest_path, 0o644)
+        
     except Exception as e:
-        print(str(e))
+        print(f"Failed to copy file to rclone mount: {str(e)}")
+
 
 def create_mosaic_footprint_as_line(files, raw_img_folder, flight_timestamp, image, engine, footprint):
     bboxes = create_img_bounding_boxes(files, raw_img_folder)
@@ -185,9 +254,12 @@ def create_boundaries_and_centroids(flight_timestamp, kml_boundaries_file, bboxe
     try:
         # NB bboxes is a set of bounding boxes for each image (excluding the first, if exclude_first is True) gpd.io.file.fiona.drvsupport.supported_drivers['KML'] = 'rw' # Enables 
         # fiona KML driver
-        gpd.io.file.fiona.drvsupport.supported_drivers['LIBKML'] = 'rw' # Enables fiona KML driver
+        # gpd.io.file.fiona.drvsupport.supported_drivers['LIBKML'] = 'rw' # Enables fiona KML driver
+        # Use fiona directly to enable LIBKML driver support
+        fiona.drvsupport.supported_drivers['LIBKML'] = 'rw'    
         kml_boundaries = gpd.read_file(kml_boundaries_file)
-        kml_boundaries['geometry'] = kml_boundaries.geometry.buffer(0)
+        # kml_boundaries['geometry'] = kml_boundaries.geometry.buffer(0)
+        kml_boundaries['geometry'] = kml_boundaries.geometry.make_valid()
         boundary_geometries = []
         try:
             boundary_geometries = [geom for geom in kml_boundaries.unary_union.geoms]
@@ -252,10 +324,13 @@ def send_notification_emails(flight_name, success, msg, districts=[]):
                 HtmlBody='Automated email advising that a new dataset,' + flight_name + ', has arrived and has been successfully processed; it can be viewed in SSS.<br>' + msg)
 
 def publish_image_on_geoserver(flight_name, image_name=None):
+    print('publishing to geoserver...')
     flight_timestamp = flight_name.replace("FireFlight_", "")
     headers = {'Content-type': 'application/xml'}
     file_url_base = os.environ.get('general_file_url_base', 'file:///rclone-mounts/thermalimaging-flightmosaics/')
     gs_url_base = os.environ.get('general_gs_url_base','https://hotspots.dbca.wa.gov.au/geoserver/rest/workspaces/hotspots/coveragestores/')
+    print('gs_url_base: ')
+    print(gs_url_base)
     if image_name is None:
         gs_layer_url = gs_url_base + flight_name + '.tif/coverages'
     else:
@@ -273,15 +348,28 @@ def publish_image_on_geoserver(flight_name, image_name=None):
     else:
         layer_data = '<coverage><name>{flight_timestamp}_img_{image}</name><title>{flight_timestamp}_img_{image}</title><srs>EPSG:28350</srs></coverage>'.format(flight_timestamp=flight_timestamp, image=image_name[:-4])
     response = requests.post(gs_layer_url, headers=headers, data=layer_data, auth=(user, gs_pwd))
-    #if response.status_code == 201:
-    #   print('Great success!')
+    if response.status_code == 201:
+        print('Great success!')
+    else:
+        print('Error Geoserver')
+        print(response.status_code)
+        print(response.text)
 
 
 ##############################################################################
 # MAIN PROCESS In response to new zipfile in source folder, create destination folder
-flight_name = sys.argv[1]
+# flight_name = sys.argv[1]
+# flight_timestamp = flight_name.replace("FireFlight_", "")
+# main_folder = os.path.join(dest_folder, flight_name)
+
+# Argument is now the full path, e.g., /data/.../FireFlight_2024...
+flight_path_arg = sys.argv[1]
+# Extract just the folder name (FireFlight_...)
+flight_name = os.path.basename(flight_path_arg)
 flight_timestamp = flight_name.replace("FireFlight_", "")
-main_folder = os.path.join(dest_folder, flight_name)
+# The argument passed is already the main folder path
+main_folder = flight_path_arg
+
 # Set filepaths and a couple of other settings
 raw_img_folder = os.path.join(main_folder, "PNGs/CAMERA1")
 output_folder = os.path.join(main_folder, "Processed")
@@ -323,8 +411,10 @@ else:
         success = False
         msg += "\nMosaic production on kens-therm-001 failed"
         print("Mosaic production on kens-therm-001 failed")
+
     time.sleep(60)
     mosaic_pushed_to_azure = False
+
     try:
         push_to_azure(mosaic_image, flight_name + ".tif")
         msg += "\nMosaic pushed to Azure OK"
@@ -333,15 +423,19 @@ else:
     except:
         msg += "\nMosaic push to Azure failed"
         print("Mosaic push to Azure failed")
+
     try:
         create_mosaic_footprint_as_line(files, raw_img_folder, flight_timestamp, mosaic_image, engine, footprint)
         # NB this populates footprint.as_line and footprint.as_poly
         msg += "\nFootprint produced and pushed to PostGIS OK"
         print("Footprint produced and pushed to PostGIS OK")
-    except:
+    except Exception as e:
         success = False
         msg += "\nFootprint production or push to PostGIS failed"
-        print("Footprint production or push to PostGIS failed")
+        error_message = f"Footprint production or push to PostGIS failed: {e}"
+        print(error_message)
+        logger.error(error_message)
+
     try:
         get_footprint_districts(footprint)
         msg += "\nFootprint lies in district(s) " + str(footprint.districts)
@@ -350,6 +444,7 @@ else:
         success = False
         msg += "\nFootprint district(s) not found"
         print("Footprint district(s) not found")
+
     try:
         bboxes = create_img_bounding_boxes(files, raw_img_folder)
         msg += "\nBounding box creation for images OK"
@@ -358,6 +453,7 @@ else:
         success = False
         msg += "\nBounding box creation for images failed"
         print("Bounding box creation for images failed")
+
     try:
         all_images_with_hotspots = create_boundaries_and_centroids(flight_timestamp, kml_boundaries_file, bboxes, engine) # e.g. = ['000039.png', '000040.png', ... , '000106.png']
         if all_images_with_hotspots == []:
@@ -371,6 +467,7 @@ else:
         success = False
         msg += "\nBoundaries and centroids creation or push to PostGIS failed"
         print("Boundaries and centroids creation or push to PostGIS failed")
+
     try:
         if len(all_images_with_hotspots) > 0:
             for img in all_images_with_hotspots:
@@ -381,8 +478,10 @@ else:
     except:
         msg += "\nProduction of tif images failed"
         print("Production of tif images failed")
+
     # A cron job runs in Rancher every 5 min to update the file storage for geoserver; also allow extra time for processing - 10 min; later reduced to 1min
     time.sleep(60)
+
     try:
         if mosaic_pushed_to_azure:
             publish_image_on_geoserver(flight_name)
@@ -394,11 +493,26 @@ else:
         for img in all_images_with_hotspots:
             img = img.replace(".png", ".tif")
             publish_image_on_geoserver(flight_name, img)
-    except:
+    except Exception as e:
         success = False
         msg += "\nMosaic publishing on geoserver failed"
-        print("Mosaic publishing on geoserver failed")
-    with open('./logs/' + flight_name + '.txt', 'w+') as fh:
+        # FIX: Print detailed error message
+        error_detail = f"Mosaic publishing on geoserver failed: {e}"
+        print(error_detail)
+        logger.error(error_detail) 
+
+    # with open('./logs/' + flight_name + '.txt', 'w+') as fh:
+    #     fh.write(msg)
+    # Calculate absolute path to the logs folder
+    # Script: .../thermal-image-processing/thermalimageprocessing/thermal_image_processing.py
+    # Logs:   .../thermal-image-processing/logs/
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    logs_folder = os.path.join(base_dir, 'logs')
+
+    # Ensure the folder exists just in case
+    if not os.path.exists(logs_folder):
+        os.makedirs(logs_folder)
+
+    # Write log file
+    with open(os.path.join(logs_folder, flight_name + '.txt'), 'w+') as fh:
         fh.write(msg)
-    #print(msg)
-    #send_notification_emails(flight_name, success, msg, footprint.districts)
