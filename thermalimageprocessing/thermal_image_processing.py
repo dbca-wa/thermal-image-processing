@@ -377,8 +377,8 @@ def publish_image_on_geoserver(flight_name, image_name=None):
             print(error_msg)
             print(f"Response: {response.text}")
     except Exception as e:
-        error_msg = f"Exception during Layer publication: {e}", exc_info=True
-        logger.error(error_msg)
+        error_msg = f"Exception during Layer publication: {e}"
+        logger.error(error_msg, exc_info=True)
         print(error_msg)
 
 
