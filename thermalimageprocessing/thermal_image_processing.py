@@ -186,7 +186,7 @@ def copy_to_geoserver_storage(source_file, relative_dest_path):
         
         # FIX: Change file permissions to 644 (Owner: RW, Group: R, Others: R)
         # This ensures the GeoServer container can read the file.
-        os.chmod(dest_path, 0o644)
+        # os.chmod(dest_path, 0o644)
         
     except Exception as e:
         error_msg = f"Failed to copy file to rclone mount: {e}"
