@@ -289,10 +289,17 @@ def create_boundaries_and_centroids(flight_timestamp, kml_boundaries_file, bboxe
                             if fixed_geom.is_empty:
                                 logger.warning(f"Invalid geometry found and could not be fixed (resulted in empty geom). Skipping feature.")
                                 continue
-                            feature['geometry'] = mapping(fixed_geom)
-                        
-                        # Add the cleaned and validated feature to our list
-                        clean_features.append(feature)
+
+                            # Create a NEW feature dictionary instead of modifying the existing one.
+                            clean_feature = {
+                                'type': feature.get('type', 'Feature'),
+                                'properties': feature.get('properties', {}),
+                                'geometry': mapping(fixed_geom)
+                            }
+                            clean_features.append(clean_feature)
+                        else: 
+                            # If geometry is valid as is, just append the original feature
+                            clean_features.append(feature)
 
                     except Exception as e:
                         logger.error(f"Could not process a feature due to an error: {e}. Skipping.", exc_info=False)
