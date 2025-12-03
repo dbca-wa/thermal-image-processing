@@ -20,6 +20,7 @@ from shapely.geometry import LineString, Polygon
 from sqlalchemy import create_engine
 from postmarker.core import PostmarkClient
 from azure.storage.blob import BlobServiceClient, BlobClient, ContainerClient
+from shapely.geometry import shape, mapping
 
 logger = logging.getLogger(__name__)
 
@@ -255,13 +256,76 @@ def create_boundaries_and_centroids(flight_timestamp, kml_boundaries_file, bboxe
         # gpd.io.file.fiona.drvsupport.supported_drivers['LIBKML'] = 'rw' # Enables fiona KML driver
         # Use fiona directly to enable LIBKML driver support
         fiona.drvsupport.supported_drivers['LIBKML'] = 'rw'    
-        kml_boundaries = gpd.read_file(kml_boundaries_file)
+        fiona.drvsupport.supported_drivers['KML'] = 'rw'
+        # kml_boundaries = gpd.read_file(kml_boundaries_file)
         # kml_boundaries['geometry'] = kml_boundaries.geometry.buffer(0)
-        kml_boundaries['geometry'] = kml_boundaries.geometry.make_valid()
+        # kml_boundaries['geometry'] = kml_boundaries.geometry.make_valid()
+
+        # =====================================================================
+        # FIX: Implement the robust feature-by-feature reading and cleaning process.
+        # This avoids the crash by validating and fixing each geometry individually.
+
+        clean_features = []
+        geom_types_to_keep = ['Polygon', 'MultiPolygon']
+
+        logger.info(f"Reading and cleaning KML file: {kml_boundaries_file}")
+        with fiona.open(kml_boundaries_file, 'r') as source:
+            for feature in source:
+                # Skip features with no geometry
+                if not feature.get('geometry'):
+                    continue
+
+                # Filter to keep only polygon types
+                if feature['geometry']['type'] in geom_types_to_keep:
+                    try:
+                        # Convert the Fiona geometry to a Shapely geometry object
+                        geom = shape(feature['geometry'])
+
+                        # Check for validity. If not valid, try to fix it with buffer(0).
+                        # buffer(0) is a powerful trick that fixes many issues, including non-closed rings.
+                        if not geom.is_valid:
+                            fixed_geom = geom.buffer(0)
+                            # If buffer(0) resulted in an empty geometry, skip it
+                            if fixed_geom.is_empty:
+                                logger.warning(f"Invalid geometry found and could not be fixed (resulted in empty geom). Skipping feature.")
+                                continue
+
+                            # Create a NEW feature dictionary instead of modifying the existing one.
+                            clean_feature = {
+                                'type': feature.get('type', 'Feature'),
+                                'properties': feature.get('properties', {}),
+                                'geometry': mapping(fixed_geom)
+                            }
+                            clean_features.append(clean_feature)
+                        else: 
+                            # If geometry is valid as is, just append the original feature
+                            clean_features.append(feature)
+
+                    except Exception as e:
+                        logger.error(f"Could not process a feature due to an error: {e}. Skipping.", exc_info=False)
+        
+        # If no valid polygons were found after cleaning, exit the function.
+        if not clean_features:
+            logger.warning(f"No valid Polygon or MultiPolygon features found in KML file after cleaning.")
+            return []
+
+        # Create a clean GeoDataFrame from the list of validated features.
+        kml_boundaries = gpd.GeoDataFrame.from_features(clean_features, crs=source.crs)
+        logger.info(f"Successfully loaded {len(kml_boundaries)} valid polygon features.")
+        # =====================================================================
+
         boundary_geometries = []
         try:
-            boundary_geometries = [geom for geom in kml_boundaries.unary_union.geoms]
+            # boundary_geometries = [geom for geom in kml_boundaries.unary_union.geoms]
+            # The unary_union might result in a single geometry, not a list of geoms
+            # It's safer to handle both cases
+            union_geom = kml_boundaries.union_all()
+            if union_geom.geom_type in ('MultiPolygon', 'GeometryCollection'):
+                boundary_geometries = list(union_geom.geoms)
+            else:
+                boundary_geometries = [union_geom]
         except:
+            logger.error(f"Error during unary_union: {e}", exc_info=True)
             return []
         included_geometries = []
         centroid_geometries = []
@@ -298,7 +362,7 @@ def create_boundaries_and_centroids(flight_timestamp, kml_boundaries_file, bboxe
         centroids.to_file(output_geopackage, layer='centroids', driver="GPKG")
         centroids.to_postgis("hotspot_centroids", engine, if_exists="append")
     except Exception as e:
-        print(e)
+        logger.error(f"An unexpected error occurred in create_boundaries_and_centroids: {e}", exc_info=True)
     finally:
         return sorted(all_images_with_hotspots)
 
@@ -368,6 +432,10 @@ def publish_image_on_geoserver(flight_name, image_name=None):
 
         if response.status_code == 201:
             success_message = 'Great success! Layer published on GeoServer.'
+            logger.info(success_message)
+            print(success_message)
+        elif response.status_code == 500 and "already exists" in response.text:
+            success_message = 'Layer already exists on GeoServer (Status 500). Skipping.'
             logger.info(success_message)
             print(success_message)
         else:
