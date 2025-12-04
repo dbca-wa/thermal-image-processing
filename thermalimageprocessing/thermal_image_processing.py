@@ -409,8 +409,8 @@ def publish_image_on_geoserver(flight_name, image_name=None):
     # --- Create Coverage Store ---
     try:
         response = requests.post(gs_url_base, headers=headers, data=store_data, auth=(user, gs_pwd))
-        if response.status_code == 201:
-            logger.info("Coverage Store created successfully.")
+        if response.status_code in [200, 201]:
+            logger.info(f"Coverage Store created successfully. (Status {response.status_code})")
         elif response.status_code == 500 and "already exists" in response.text:
             # Not strictly an error if we are updating or reprocessing
             logger.info(f"Coverage Store already exists. Status: {response.status_code}")
