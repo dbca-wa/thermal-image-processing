@@ -204,7 +204,7 @@ def copy_to_geoserver_storage(source_file, relative_dest_path):
         logger.error(error_msg, exc_info=True)
 
 
-def create_mosaic_footprint_as_line(files, raw_img_folder, flight_timestamp, image, engine, footprint):
+def create_mosaic_footprint_as_line(files, raw_img_folder, flight_timestamp, image, engine, footprint, output_geopackage):
     bboxes = create_img_bounding_boxes(files, raw_img_folder)
     minx, miny, maxx, maxy = bboxes.geometry.total_bounds
     # Create linestring
@@ -219,7 +219,7 @@ def create_mosaic_footprint_as_line(files, raw_img_folder, flight_timestamp, ima
     footprint_poly_layer = gpd.geodataframe.GeoDataFrame(data_dictionary, crs="EPSG:4326", geometry=poly_geom)
     footprint_poly_layer.to_file(output_geopackage, layer='footprint', driver="GPKG")
 
-def get_footprint_districts(footprint):
+def get_footprint_districts(footprint, output_geopackage):
     districts_gdf = gpd.read_file(districts_gpkg, layer=districts_layer_name)
     footprint_gdf = gpd.read_file(output_geopackage, layer='footprint')
     for index, footprint_feature in footprint_gdf.iterrows():
@@ -255,7 +255,7 @@ def create_img_bounding_boxes(files, raw_img_folder):
     bboxes = bboxes.to_crs('EPSG:4326')
     return bboxes 
 
-def create_boundaries_and_centroids(flight_timestamp, kml_boundaries_file, bboxes, engine):
+def create_boundaries_and_centroids(flight_timestamp, kml_boundaries_file, bboxes, engine, output_geopackage):
     all_images_with_hotspots = []
     try:
         # NB bboxes is a set of bounding boxes for each image (excluding the first, if exclude_first is True) gpd.io.file.fiona.drvsupport.supported_drivers['KML'] = 'rw' # Enables 
@@ -524,10 +524,6 @@ def run_thermal_processing(flight_path_arg):
     """
     Main entry point for thermal image processing.
     """
-    # Make these variables available globally so other functions 
-    # (like create_boundaries_and_centroids) can access them.
-    global output_geopackage, output_folder
-
     # Argument is now the full path
     flight_name = os.path.basename(flight_path_arg)
     flight_timestamp = flight_name.replace("FireFlight_", "")
@@ -594,7 +590,6 @@ def run_thermal_processing(flight_path_arg):
             os.makedirs(output_folder)
         
         success = True
-        global msg
         msg = ""
         all_images_with_hotspots = []
         mosaic_stored_ok = False
@@ -633,7 +628,7 @@ def run_thermal_processing(flight_path_arg):
             # --- Log: Footprint Creation ---
             logger.info(">>> Step 3/8: Creating Footprint and pushing to PostGIS...")
             
-            create_mosaic_footprint_as_line(files, raw_img_folder, flight_timestamp, mosaic_image, engine, footprint)
+            create_mosaic_footprint_as_line(files, raw_img_folder, flight_timestamp, mosaic_image, engine, footprint, output_geopackage)
             success_msg = "Footprint produced and pushed to PostGIS OK"
             msg += "\n" + success_msg
             logger.info(success_msg) 
@@ -647,7 +642,7 @@ def run_thermal_processing(flight_path_arg):
             # --- Log: District Check ---
             logger.info(">>> Step 4/8: Checking Districts...")
             
-            get_footprint_districts(footprint)
+            get_footprint_districts(footprint, output_geopackage)
             success_msg = "Footprint lies in district(s) " + str(footprint.districts)
             msg += "\n" + success_msg
             logger.info(success_msg)
@@ -675,7 +670,7 @@ def run_thermal_processing(flight_path_arg):
             # --- Log: Hotspot Analysis ---
             logger.info(">>> Step 6/8: Analyzing Hotspots (Intersects)...")
             
-            all_images_with_hotspots = create_boundaries_and_centroids(flight_timestamp, kml_boundaries_file, bboxes, engine)
+            all_images_with_hotspots = create_boundaries_and_centroids(flight_timestamp, kml_boundaries_file, bboxes, engine, output_geopackage)
             if all_images_with_hotspots == []:
                 success_msg = "NO HOTSPOTS FOUND!!!"
                 msg += "\n" + success_msg
