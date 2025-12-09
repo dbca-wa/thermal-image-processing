@@ -1,4 +1,3 @@
-from configparser import ConfigParser
 import os
 import shutil
 import subprocess
@@ -37,11 +36,6 @@ gdal.SetConfigOption('CHECK_DISK_FREE_SPACE', 'FALSE')
 # FIX: Automatically close open polygons in KML files to prevent "LinearRing do not form a closed linestring" error
 gdal.SetConfigOption('OGR_GEOMETRY_ACCEPT_UNCLOSED_RING', 'YES')
 
-# print(os.environ.get('KEY_THAT_MIGHT_EXIST', default_value))
-# os.environ.get('') #
-# Settings, could go to config file if neeeded
-#config = ConfigParser()
-#config.read(os.path.join(os.path.dirname(__file__),'config.cfg'))
 input_image_file_ext = ".png"
 output_image_file_ext = ".tif"
 
