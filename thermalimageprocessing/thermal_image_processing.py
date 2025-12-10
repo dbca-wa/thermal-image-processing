@@ -20,6 +20,7 @@ from sqlalchemy import create_engine
 from postmarker.core import PostmarkClient
 from azure.storage.blob import BlobServiceClient, BlobClient, ContainerClient
 from shapely.geometry import shape, mapping
+from tipapp.emails import ThermalProcessingEmailSender
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(current_dir)
@@ -554,6 +555,18 @@ def run_thermal_processing(flight_path_arg):
     file_handler.setFormatter(formatter)
     logger.addHandler(file_handler)
 
+    # Instantiate the email sender service at the beginning.
+    email_sender = ThermalProcessingEmailSender()
+
+    # Send the "Processing Started" notification immediately.
+    # We wrap this in a try/except block so that a failure in sending this email
+    # does not prevent the main processing from running.
+    try:
+        logger.info(">>> Sending 'Processing Started' notification email...")
+        email_sender.send_processing_started_notification(flight_name)
+    except Exception as e:
+        logger.error(f"Failed to send 'started' notification email: {e}", exc_info=True)
+
     # --- Log: Start Process ---
     start_msg = f"=== STARTING PROCESSING FOR: {flight_name} ==="
     logger.info(start_msg)
@@ -571,7 +584,12 @@ def run_thermal_processing(flight_path_arg):
                     break
     
     if kml_boundaries_file == "":
-        send_notification_emails(flight_name, False, "No file named *SuperMosaic*BND.kml found in KML Boundaries folder")
+        # send_notification_emails(flight_name, False, "No file named *SuperMosaic*BND.kml found in KML Boundaries folder")
+        logger.error("No KML boundary file found. Processing will be marked as failed.")
+        # Set up variables for the finally block
+        success = False
+        error_details = "Critical Error: No file named *SuperMosaic*BND.kml found in KML Boundaries folder."
+        msg = error_details
     else:
         engine = create_engine(postgis_table)
         
