@@ -630,33 +630,17 @@ def run_thermal_processing(flight_path_arg):
         logger.info("Mosaic pushed to GeoServer storage OK")
         mosaic_stored_ok = True
 
-        try:
-            # --- Log: Footprint Creation ---
-            logger.info(">>> Step 3/8: Creating Footprint and pushing to PostGIS...")
-            
-            create_mosaic_footprint_as_line(files, raw_img_folder, flight_timestamp, mosaic_image, engine, footprint, output_geopackage)
-            success_msg = "Footprint produced and pushed to PostGIS OK"
-            msg += "\n" + success_msg
-            logger.info(success_msg) 
-        except Exception as e:
-            success = False
-            msg += "\nFootprint production or push to PostGIS failed"
-            error_message = f"Footprint production or push to PostGIS failed: {e}"
-            logger.error(error_message)
+        # --- Log: Footprint Creation ---
+        logger.info(">>> Step 3/8: Creating Footprint and pushing to PostGIS...")
+        create_mosaic_footprint_as_line(files, raw_img_folder, flight_timestamp, mosaic_image, engine, footprint, output_geopackage)
+        msg += "\nFootprint produced and pushed to PostGIS OK"
+        logger.info('Footprint produced and pushed to PostGIS OK') 
 
-        try:
-            # --- Log: District Check ---
-            logger.info(">>> Step 4/8: Checking Districts...")
-            
-            get_footprint_districts(footprint, output_geopackage)
-            success_msg = "Footprint lies in district(s) " + str(footprint.districts)
-            msg += "\n" + success_msg
-            logger.info(success_msg)
-        except Exception as e:
-            success = False
-            error_message = f"Footprint district(s) not found: {e}"
-            msg += "\n" + error_message
-            logger.error(error_message, exc_info=True)
+        # --- Log: District Check ---
+        logger.info(">>> Step 4/8: Checking Districts...")
+        get_footprint_districts(footprint, output_geopackage)
+        msg += "\nFootprint lies in district(s) " + str(footprint.districts)
+        logger.info("Footprint lies in district(s) " + str(footprint.districts))
 
         try:
             # --- Log: Bounding Boxes ---
