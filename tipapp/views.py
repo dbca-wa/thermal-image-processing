@@ -195,7 +195,6 @@ def api_delete_thermal_file(request, *args, **kwargs):
 def api_download_thermal_file_or_folder(request, *args, **kwargs):
     logger.info(f"Download request received from user: {request.user} for path: {request.GET.get('file_path')}")
 
-    dir_path = settings.DATA_STORAGE
     target_path = request.GET.get('file_path', '')
 
     file_path = target_path
