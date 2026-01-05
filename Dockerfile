@@ -21,11 +21,18 @@ RUN apt-get upgrade -y
 RUN apt-get install --no-install-recommends -y wget git libmagic-dev gcc binutils libproj-dev python3 python3-setuptools python3-dev python3-pip tzdata libreoffice cron python3-gunicorn
 RUN apt-get install --no-install-recommends -y libpq-dev patch virtualenv
 RUN apt-get install --no-install-recommends -y postgresql-client mtr 
-RUN apt-get install --no-install-recommends -y sqlite3 vim postgresql-client ssh htop iputils-ping python3-azure
-RUN apt-get install --no-install-recommends -y gdal-bin python3-gdal
-RUN apt-get install --no-install-recommends -y libgdal-dev build-essential p7zip-full
+RUN apt-get install --no-install-recommends -y sqlite3 vim postgresql-client ssh htop iputils-ping python3-azure p7zip-full
+# RUN apt-get install --no-install-recommends -y gdal-bin python3-gdal
+# RUN apt-get install --no-install-recommends -y libgdal-dev build-essential 
 
 RUN ln -s /usr/bin/python3 /usr/bin/python 
+
+# Install GDAL
+RUN add-apt-repository ppa:ubuntugis/ubuntugis-unstable
+RUN apt update
+RUN apt-get install --no-install-recommends -y gdal-bin python3-gdal
+RUN apt-get install --no-install-recommends -y libgdal-dev build-essential
+
 
 RUN groupadd -g 5000 oim 
 RUN useradd -g 5000 -u 5000 oim -s /bin/bash -d /app
