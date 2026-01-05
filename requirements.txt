@@ -9,7 +9,7 @@ psycopg2==2.9.10
 
 # Django Application Requirements
 django~=5.2.8
-gevent==24.11.1
+gevent==25.9.1
 django-extensions>=3.2.3
 djangorestframework>=3.14.0
 djangorestframework-datatables>=0.7.2
@@ -37,14 +37,14 @@ numpy==2.0.1
 git+https://github.com/dbca-wa/appmonitor_client.git#egg=appmonitor_client
 cryptography>=42.0.7
 pillow==10.3.0
-pyjwt==2.8.0
+pyjwt==2.10.1
 urllib3>=2.1.0
 wheel==0.42.0
 oauthlib==3.2.2
-sentry-sdk==1.44
+sentry-sdk~=2.19
 requests>=2.32.3
 anyio>=4.4.0
 GDAL==3.8.4
-setuptools==72.0.0
+setuptools~=80.3
 fiona~=1.10.1
 GeoAlchemy2~=0.18.1
