@@ -41,9 +41,9 @@ RUN mkdir /app
 RUN chown -R oim.oim /app 
 
 # Default Scripts
-RUN wget https://raw.githubusercontent.com/dbca-wa/wagov_utils/main/wagov_utils/bin/default_script_installer.sh -O /tmp/default_script_installer.sh
-RUN chmod 755 /tmp/default_script_installer.sh
-RUN /tmp/default_script_installer.sh
+# RUN wget https://raw.githubusercontent.com/dbca-wa/wagov_utils/main/wagov_utils/bin/default_script_installer.sh -O /tmp/default_script_installer.sh
+# RUN chmod 755 /tmp/default_script_installer.sh
+# RUN /tmp/default_script_installer.sh
 
 RUN apt-get install --no-install-recommends -y python3-pil
 
