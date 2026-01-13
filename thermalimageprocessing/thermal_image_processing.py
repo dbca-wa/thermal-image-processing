@@ -175,42 +175,60 @@ def translate_png2tif(input_png, short_file, flight_name):
 def copy_to_geoserver_storage(source_file, relative_dest_path):
     """
     Copies the processed image file to the shared storage mount for GeoServer.
+    
+    Args:
+        source_file: Absolute path to the source file to copy
+        relative_dest_path: Relative path within the GeoServer storage mount
+        
+    Raises:
+        FileNotFoundError: If source file does not exist
+        OSError: If file copy operation fails
     """
     try:
+        # Validate that source file exists before attempting copy
+        if not os.path.exists(source_file):
+            error_msg = f"Source file does not exist: {source_file}"
+            logger.error(error_msg)
+            raise FileNotFoundError(error_msg)
+        
         # Define the target base path
         mount_base_path = "/rclone-mounts/thermalimaging-flightmosaics"
         
         # Construct the full destination path
-        # blob_name is used here as the relative path (e.g., 'FlightName.tif' or 'FlightName_images/xxx.tif')
+        # relative_dest_path format: 'FlightName.tif' or 'FlightName_images/xxx.tif'
         dest_path = os.path.join(mount_base_path, relative_dest_path)
 
-        try:
-            file_size = os.path.getsize(source_file)
-            file_size_mb = file_size / (1024 * 1024) # Convert to MB
-            logger.info(f"Copying file ({file_size_mb:.2f} MB) to GeoServer storage...")
-        except OSError:
-            # Handle cases where file might not exist yet (though unlikely here)
-            logger.warning(f"Copying file to GeoServer storage (Size unknown).")
+        # Log file size for tracking
+        file_size = os.path.getsize(source_file)
+        file_size_mb = file_size / (1024 * 1024)  # Convert to MB
+        logger.info(f"Copying file ({file_size_mb:.2f} MB) to GeoServer storage...")
+        logger.info(f"  Source: {source_file}")
+        logger.info(f"  Destination: {dest_path}")
 
-        logger.info(f"Source: {source_file}")
-        logger.info(f"Destination: {dest_path}")
-
-        # Extract the directory path
+        # Create destination directory if it doesn't exist
         dest_dir = os.path.dirname(dest_path)
-        
-        # Create the directory if it does not exist
         if not os.path.exists(dest_dir):
+            logger.info(f"Creating destination directory: {dest_dir}")
             os.makedirs(dest_dir, exist_ok=True)
         
-        # Copy the image file to the destination
+        # Perform the file copy operation
         shutil.copyfile(source_file, dest_path)
-
-        logger.info(f"Copy complete.") 
+        
+        # Verify the copy was successful by checking destination file exists
+        if os.path.exists(dest_path):
+            dest_size = os.path.getsize(dest_path)
+            if dest_size == file_size:
+                logger.info(f"Copy complete and verified: {os.path.basename(dest_path)}")
+            else:
+                logger.warning(f"Copy completed but file size mismatch: source={file_size}, dest={dest_size}")
+        else:
+            raise OSError(f"Copy operation reported success but destination file not found: {dest_path}")
         
     except Exception as e:
-        error_msg = f"Failed to copy file to rclone mount: {e}"
-        # Log the error with full stack trace
+        error_msg = f"Failed to copy file to GeoServer storage: {e}"
         logger.error(error_msg, exc_info=True)
+        # Re-raise the exception so caller can handle it appropriately
+        raise
 
 
 def create_mosaic_footprint_as_line(files, raw_img_folder, flight_timestamp, image, engine, footprint, output_geopackage):
@@ -612,10 +630,15 @@ def run_thermal_processing(flight_path_arg):
 
         # --- Log: File Copy/Upload ---
         logger.info(">>> Step 2/8: Copying Mosaic to GeoServer Storage...")
-        copy_to_geoserver_storage(mosaic_image, flight_name + ".tif")
-        msg += "\nMosaic pushed to GeoServer storage OK"
-        logger.info("Mosaic pushed to GeoServer storage OK")
-        mosaic_stored_ok = True
+        try:
+            copy_to_geoserver_storage(mosaic_image, flight_name + ".tif")
+            msg += "\nMosaic pushed to GeoServer storage OK"
+            logger.info("Mosaic pushed to GeoServer storage OK")
+            mosaic_stored_ok = True
+        except Exception as e:
+            error_msg = f"Failed to copy mosaic to GeoServer storage: {e}"
+            logger.error(error_msg, exc_info=True)
+            raise  # Critical error - mosaic must be stored
 
         # --- Log: Footprint Creation ---
         logger.info(">>> Step 3/8: Creating Footprint and pushing to PostGIS...")
