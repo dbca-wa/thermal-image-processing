@@ -158,7 +158,16 @@ def translate_png2tif(input_png, short_file, flight_name):
     # Translates png to tif
     output_tif = input_png.replace(".png", ".tif")
     tif_filename = short_file.replace(".png", ".tif")
-    gdal.Translate(output_tif, input_png, outputSRS="EPSG:28350")
+    
+    logger.info(f"Converting PNG to TIF: {short_file}")
+    
+    try:
+        gdal.Translate(output_tif, input_png, outputSRS="EPSG:28350")
+        logger.info(f"Successfully converted: {short_file} -> {tif_filename}")
+    except Exception as e:
+        logger.error(f"Failed to convert {short_file} to TIF: {e}", exc_info=True)
+        raise  # Re-raise to let the caller handle it
+    
     relative_path = flight_name + "_images/" + tif_filename
     copy_to_geoserver_storage(output_tif, relative_path)
     #publish_image_on_geoserver(flight_name, tif_filename)
@@ -643,12 +652,19 @@ def run_thermal_processing(flight_path_arg):
         # --- Log: Image Conversion ---
         count = len(all_images_with_hotspots)
         logger.info(f">>> Step 7/8: Converting {count} Hotspot Images (PNG to TIF)...")
+        converted_count = 0
+        failed_count = 0
         if len(all_images_with_hotspots) > 0:
             for img in all_images_with_hotspots:
                 full_path = os.path.join(raw_img_folder, img)
-                translate_png2tif(full_path, img, flight_name)
-            msg += "\nProduction of tif images OK"
-            logger.info("Production of tif images OK")
+                try:
+                    translate_png2tif(full_path, img, flight_name)
+                    converted_count += 1
+                except Exception as e:
+                    logger.error(f"Skipping image {img} due to conversion error: {e}")
+                    failed_count += 1
+            msg += f"\nProduction of tif images: {converted_count} succeeded, {failed_count} failed"
+            logger.info(f"Production of tif images: {converted_count} succeeded, {failed_count} failed")
 
         # Wait for storage sync
         time.sleep(60)
