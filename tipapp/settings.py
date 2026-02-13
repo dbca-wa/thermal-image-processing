@@ -281,7 +281,7 @@ if platform.machine() == "arm64":
     GEOS_LIBRARY_PATH = "/opt/homebrew/opt/geos/lib/libgeos_c.dylib"
 
 # Django Timezone
-TIME_ZONE = 'Australia/Perth'
+TIME_ZONE = decouple.config("TIME_ZONE", default='Australia/Perth')
 # DATE_FORMAT = 'dd/mm/YYYY'
 # DATETIME_FORMAT = 'dd/mm/YYYY HH:ii:ss'
 # SHORT_DATE_FORMAT = 'dd/mm/YY'

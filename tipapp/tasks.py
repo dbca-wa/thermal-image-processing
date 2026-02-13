@@ -4,6 +4,7 @@ import logging
 from datetime import datetime, timezone
 from pathlib import Path
 import py7zr
+from zoneinfo import ZoneInfo
 
 from tipapp import settings
 
@@ -12,7 +13,9 @@ logger = logging.getLogger(__name__)
 
 def convert_date(timestamp):
     d = datetime.fromtimestamp(timestamp, timezone.utc)
-    formatted_date = d.strftime('%d %b %Y %H:%M:%S')
+    local_tz = ZoneInfo(settings.TIME_ZONE)
+    d_local = d.astimezone(local_tz)
+    formatted_date = d_local.strftime('%d %b %Y %H:%M:%S')
     return formatted_date
 
 def get_files_list(dir_path, extensions = []):
