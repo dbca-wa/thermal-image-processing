@@ -43,7 +43,7 @@ def get_dir_size(dir_path):
 def get_thermal_files(dir_path, page, offset, search = "", sort_by = "name", sort_order = "asc"):
     all_items = []
     try:
-        # First, collect all entries with their metadata
+        # Collect all entries with lightweight metadata (no directory size calculation yet)
         for entry in os.scandir(dir_path):
             entry_name = entry.name
             if search != "" and not re.search(str.lower(search), str.lower(entry_name)):
@@ -56,12 +56,9 @@ def get_thermal_files(dir_path, page, offset, search = "", sort_by = "name", sor
                 "path": entry.path, 
                 "created_at": convert_date(info.st_mtime),
                 "created_at_timestamp": info.st_mtime,
-                "is_dir": is_dir
+                "is_dir": is_dir,
+                "size": info.st_size if not is_dir else 0  # Use 0 for dirs temporarily
             }
-            if is_dir:
-                item['size'] = get_dir_size(entry.path)
-            else:
-                item['size'] = info.st_size
             all_items.append(item)
         
         # Sort the items
@@ -73,24 +70,35 @@ def get_thermal_files(dir_path, page, offset, search = "", sort_by = "name", sor
             # Sort folders first, then by creation date
             all_items.sort(key=lambda x: (x['is_dir'] == False, x['created_at_timestamp']), reverse=reverse)
         elif sort_by == "size":
+            # For size sort, we need to calculate directory sizes first
+            # Only calculate for directories to avoid unnecessary work
+            for item in all_items:
+                if item['is_dir']:
+                    item['size'] = get_dir_size(item['path'])
             # Sort folders first, then by size
             all_items.sort(key=lambda x: (x['is_dir'] == False, x['size']), reverse=reverse)
         
-        # Remove the temporary timestamp field
-        for item in all_items:
-            item.pop('created_at_timestamp', None)
-        
-        # Paginate the results
+        # Paginate the results BEFORE calculating remaining directory sizes
         start_index = page * offset
         end_index = (page + 1) * offset
-        items = all_items[start_index:end_index]
+        paginated_items = all_items[start_index:end_index]
+        
+        # Calculate directory sizes ONLY for items on the current page (if not already done)
+        if sort_by != "size":
+            for item in paginated_items:
+                if item['is_dir']:
+                    item['size'] = get_dir_size(item['path'])
+        
+        # Remove the temporary timestamp field
+        for item in paginated_items:
+            item.pop('created_at_timestamp', None)
         
     except Exception as e:
         logger.error(f"Error getting thermal files from directory: {dir_path}")
         logger.error(e)
         return []
             
-    return all_items
+    return paginated_items
 
 def get_file_record(dir_path, file_name):
     file_path = os.path.join(dir_path, file_name)
