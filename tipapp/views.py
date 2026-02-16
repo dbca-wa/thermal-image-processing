@@ -595,3 +595,24 @@ def get_job_status(request, job_id, *args, **kwargs):
     }
     
     return JsonResponse(response_data)
+
+
+# ============================================================================
+# Phase 6: Processing Jobs Dashboard View
+# ============================================================================
+
+class ProcessingJobsDashboardView(base.TemplateView):
+    """
+    Dashboard view for monitoring thermal processing jobs.
+    Displays a list of all jobs with real-time status updates.
+    """
+    template_name = "govapp/processing-jobs-dashboard.html"
+
+    def get(self, request: http.HttpRequest, *args: Any, **kwargs: Any) -> http.HttpResponse:
+        """Render the processing jobs dashboard page."""
+        from tipapp.permissions import has_admin_or_officer_permission
+        
+        context: dict[str, Any] = {
+            'has_permission': has_admin_or_officer_permission(request)
+        }
+        return shortcuts.render(request, self.template_name, context)

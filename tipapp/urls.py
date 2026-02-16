@@ -47,6 +47,9 @@ urlpatterns = [
     urls.path("upload-files", views.ThermalFilesUploadView.as_view(), name="upload-files"),
     urls.path("uploads-history", views.UploadsHistoryView.as_view(), name="uploads-history"),
     
+    # Phase 6: Processing Jobs Dashboard
+    urls.path("processing-jobs-dashboard", views.ProcessingJobsDashboardView.as_view(), name="processing-jobs-dashboard"),
+    
     urls.path("api/upload-files/thermal_files/", views.api_upload_thermal_files),
     urls.path("api/upload-files/list_pending_imports/", views.list_pending_imports),
     urls.path("api/upload-files/api_delete_thermal_file/", views.api_delete_thermal_file),

@@ -83,3 +83,18 @@ def is_officer(user: Union[models.User, models.AnonymousUser]) -> bool:
         and user.groups.filter(id=group.id).exists()  # Must be in group
     )
 
+
+
+def has_admin_or_officer_permission(request) -> bool:
+    """
+    Check if the request user has admin or officer permission.
+    
+    Args:
+        request: Django HTTP request object
+        
+    Returns:
+        bool: True if user is admin or officer, False otherwise
+    """
+    if not request.user.is_authenticated:
+        return False
+    return is_administrator(request.user) or is_officer(request.user)
