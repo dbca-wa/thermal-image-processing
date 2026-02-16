@@ -223,6 +223,40 @@ def api_upload_thermal_files(request, *args, **kwargs):
             json.dump(metadata, f, indent=2)
         logger.info(f"Metadata file created: [{metadata_path}]")
         
+        # Phase 2: Create job record for tracking
+        from tipapp.models import ThermalProcessingJob
+        
+        # Extract flight name from filename (remove extensions and timestamp)
+        # Example: FireFlight_20211203_052327.20260213_155626.7z -> FireFlight_20211203_052327
+        flight_name = newFileName
+        # Remove .7z or .zip extension
+        if flight_name.lower().endswith('.7z'):
+            flight_name = flight_name[:-3]
+        elif flight_name.lower().endswith('.zip'):
+            flight_name = flight_name[:-4]
+        # Remove timestamp if present (format: .YYYYMMDD_HHMMSS)
+        import re
+        flight_name = re.sub(r'\.\d{8}_\d{6}$', '', flight_name)
+        
+        try:
+            # Get file size
+            file_size = os.path.getsize(save_path)
+            
+            # Create job record
+            job = ThermalProcessingJob.objects.create(
+                flight_name=flight_name,
+                original_filename=uploaded_file.name,
+                status='QUEUED',  # File is in pending_imports, ready for processing
+                file_size=file_size,
+                file_path=save_path,
+                uploaded_by=request.user if request.user.is_authenticated else None,
+                uploaded_by_email=request.user.email if hasattr(request.user, 'email') else '',
+            )
+            logger.info(f"Job record created: ID={job.id}, Flight={flight_name}, Status={job.status}")
+        except Exception as e:
+            # Log error but don't fail the upload
+            logger.error(f"Failed to create job record for {flight_name}: {e}", exc_info=True)
+        
         file_info = get_file_record(settings.PENDING_IMPORT_PATH, newFileName)
         return JsonResponse({'message': 'File(s) uploaded successfully.', 'data' : file_info})
     else:
