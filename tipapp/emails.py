@@ -61,33 +61,75 @@ def _send_notification(email_class, context):
 
 
 # --- Public helper functions to be called from your application ---
-def send_processing_started_notification(flight_name: str):
+def send_processing_started_notification(flight_name: str, recipient_email: str = None):
     """
     Prepares and sends the 'Processing Started' email.
+    If recipient_email is provided, sends only to that user. Otherwise, sends to all configured recipients.
     """
     context = {
         'flight_name': flight_name,
     }
-    _send_notification(ProcessingStartedEmail, context)
+    if recipient_email:
+        # Send to specific user only
+        try:
+            email = ProcessingStartedEmail()
+            msg = email.send([recipient_email], context=context)
+            if msg:
+                logger.info(f"Successfully sent notification email to uploader: {recipient_email}")
+            else:
+                logger.error(f"Failed to send notification email to uploader: {recipient_email}")
+        except Exception as e:
+            logger.error(f"Error sending email to {recipient_email}: {e}", exc_info=True)
+    else:
+        # Send to all configured recipients (original behavior)
+        _send_notification(ProcessingStartedEmail, context)
 
 
-def send_success_notification(flight_name: str, details_message: str):
+def send_success_notification(flight_name: str, details_message: str, recipient_email: str = None):
     """
     Prepares and sends the 'Success' email.
+    If recipient_email is provided, sends only to that user. Otherwise, sends to all configured recipients.
     """
     context = {
         'flight_name': flight_name,
         'details_message': details_message,
     }
-    _send_notification(ProcessingSuccessEmail, context)
+    if recipient_email:
+        # Send to specific user only
+        try:
+            email = ProcessingSuccessEmail()
+            msg = email.send([recipient_email], context=context)
+            if msg:
+                logger.info(f"Successfully sent success notification to uploader: {recipient_email}")
+            else:
+                logger.error(f"Failed to send success notification to uploader: {recipient_email}")
+        except Exception as e:
+            logger.error(f"Error sending success email to {recipient_email}: {e}", exc_info=True)
+    else:
+        # Send to all configured recipients (original behavior)
+        _send_notification(ProcessingSuccessEmail, context)
 
 
-def send_failure_notification(flight_name: str, error_message: str):
+def send_failure_notification(flight_name: str, error_message: str, recipient_email: str = None):
     """
     Prepares and sends the 'Failure' email.
+    If recipient_email is provided, sends only to that user. Otherwise, sends to all configured recipients.
     """
     context = {
         'flight_name': flight_name,
         'error_message': error_message,
     }
-    _send_notification(ProcessingFailureEmail, context)
+    if recipient_email:
+        # Send to specific user only
+        try:
+            email = ProcessingFailureEmail()
+            msg = email.send([recipient_email], context=context)
+            if msg:
+                logger.info(f"Successfully sent failure notification to uploader: {recipient_email}")
+            else:
+                logger.error(f"Failed to send failure notification to uploader: {recipient_email}")
+        except Exception as e:
+            logger.error(f"Error sending failure email to {recipient_email}: {e}", exc_info=True)
+    else:
+        # Send to all configured recipients (original behavior)
+        _send_notification(ProcessingFailureEmail, context)

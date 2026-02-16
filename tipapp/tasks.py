@@ -46,6 +46,11 @@ def get_thermal_files(dir_path, page, offset, search = "", sort_by = "name", sor
         # Collect all entries with lightweight metadata (no directory size calculation yet)
         for entry in os.scandir(dir_path):
             entry_name = entry.name
+            
+            # Skip metadata files (hidden files used for tracking upload information)
+            if entry_name.endswith('.meta.json'):
+                continue
+            
             if search != "" and not re.search(str.lower(search), str.lower(entry_name)):
                 continue
             
