@@ -436,3 +436,162 @@ def management_command_runner_page_view(request):
     }
     
     return shortcuts.render(request, template_name, context)
+
+# ============================================================================
+# Phase 5: Job Monitoring API Endpoints
+# ============================================================================
+
+@api_view(["GET"])
+@permission_classes([IsInAdminOrOfficersGroup])
+def list_processing_jobs(request, *args, **kwargs):
+    """
+    List all thermal processing jobs with filtering and pagination.
+    
+    Query Parameters:
+        - status: Filter by job status (UPLOADED, QUEUED, PROCESSING, COMPLETED, FAILED)
+        - user_email: Filter by uploader email
+        - page: Page number (default: 1)
+        - page_size: Items per page (default: 20)
+        - sort_by: Sort field (default: -created_at)
+    
+    Returns:
+        JSON response with job list and pagination info
+    """
+    from tipapp.models import ThermalProcessingJob
+    
+    # Get all jobs
+    jobs = ThermalProcessingJob.objects.all()
+    
+    # Apply filters
+    status_filter = request.GET.get('status', '').strip()
+    if status_filter:
+        jobs = jobs.filter(status=status_filter)
+    
+    user_email_filter = request.GET.get('user_email', '').strip()
+    if user_email_filter:
+        jobs = jobs.filter(uploaded_by_email__icontains=user_email_filter)
+    
+    # Apply sorting
+    sort_by = request.GET.get('sort_by', '-created_at')
+    jobs = jobs.order_by(sort_by)
+    
+    # Pagination
+    page_param = request.GET.get('page', '1')
+    page_size_param = request.GET.get('page_size', '20')
+    
+    try:
+        page_num = int(page_param)
+        page_size = int(page_size_param)
+    except ValueError:
+        return JsonResponse({'error': 'Invalid page or page_size parameter'}, status=400)
+    
+    paginator = Paginator(jobs, page_size)
+    
+    try:
+        page = paginator.page(page_num)
+    except Exception as e:
+        return JsonResponse({'error': f'Invalid page number: {str(e)}'}, status=400)
+    
+    # Serialize job data
+    jobs_data = []
+    for job in page.object_list:
+        # Calculate processing duration if available
+        duration_seconds = None
+        if job.processing_started_at and job.processing_completed_at:
+            duration = job.processing_completed_at - job.processing_started_at
+            duration_seconds = duration.total_seconds()
+        
+        jobs_data.append({
+            'id': job.id,
+            'flight_name': job.flight_name,
+            'original_filename': job.original_filename,
+            'status': job.status,
+            'status_display': job.get_status_display(),
+            'progress_percentage': job.progress_percentage,
+            'current_step': job.current_step,
+            'uploaded_by_email': job.uploaded_by_email,
+            'file_size': job.file_size,
+            'created_at': job.created_at.isoformat(),
+            'processing_started_at': job.processing_started_at.isoformat() if job.processing_started_at else None,
+            'processing_completed_at': job.processing_completed_at.isoformat() if job.processing_completed_at else None,
+            'duration_seconds': duration_seconds,
+            'total_images_processed': job.total_images_processed,
+            'hotspots_detected': job.hotspots_detected,
+            'districts_covered': job.districts_covered,
+            'error_message': job.error_message if job.status == 'FAILED' else None,
+        })
+    
+    return JsonResponse({
+        'count': paginator.count,
+        'num_pages': paginator.num_pages,
+        'current_page': page_num,
+        'page_size': page_size,
+        'has_previous': page.has_previous(),
+        'has_next': page.has_next(),
+        'results': jobs_data,
+    })
+
+
+@api_view(["GET"])
+@permission_classes([IsInAdminOrOfficersGroup])
+def get_job_status(request, job_id, *args, **kwargs):
+    """
+    Get detailed status information for a specific job.
+    
+    Args:
+        job_id: The ID of the thermal processing job
+    
+    Returns:
+        JSON response with detailed job information
+    """
+    from tipapp.models import ThermalProcessingJob
+    
+    try:
+        job = ThermalProcessingJob.objects.get(id=job_id)
+    except ThermalProcessingJob.DoesNotExist:
+        return JsonResponse({'error': 'Job not found'}, status=404)
+    except ValueError:
+        return JsonResponse({'error': 'Invalid job ID'}, status=400)
+    
+    # Calculate processing duration if available
+    duration_seconds = None
+    duration_formatted = None
+    if job.processing_started_at and job.processing_completed_at:
+        duration = job.processing_completed_at - job.processing_started_at
+        duration_seconds = duration.total_seconds()
+        # Format duration as HH:MM:SS
+        hours = int(duration_seconds // 3600)
+        minutes = int((duration_seconds % 3600) // 60)
+        seconds = int(duration_seconds % 60)
+        duration_formatted = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+    
+    # Build detailed response
+    response_data = {
+        'id': job.id,
+        'flight_name': job.flight_name,
+        'original_filename': job.original_filename,
+        'status': job.status,
+        'status_display': job.get_status_display(),
+        'progress_percentage': job.progress_percentage,
+        'current_step': job.current_step,
+        'file_size': job.file_size,
+        'file_path': job.file_path,
+        'uploaded_by_email': job.uploaded_by_email,
+        'created_at': job.created_at.isoformat(),
+        'updated_at': job.updated_at.isoformat(),
+        'processing_started_at': job.processing_started_at.isoformat() if job.processing_started_at else None,
+        'processing_completed_at': job.processing_completed_at.isoformat() if job.processing_completed_at else None,
+        'duration_seconds': duration_seconds,
+        'duration_formatted': duration_formatted,
+        'output_geopackage_path': job.output_geopackage_path,
+        'log_file_path': job.log_file_path,
+        'total_images_processed': job.total_images_processed,
+        'hotspots_detected': job.hotspots_detected,
+        'districts_covered': job.districts_covered,
+        'error_message': job.error_message,
+        'is_processing': job.is_processing(),
+        'is_completed': job.is_completed(),
+        'is_failed': job.is_failed(),
+    }
+    
+    return JsonResponse(response_data)

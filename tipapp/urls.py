@@ -53,6 +53,10 @@ urlpatterns = [
     urls.path("api/thermal-files/list_thermal_folder_contents/", views.list_thermal_folder_contents),
     urls.path("api/thermal-files/list_uploaded_files/", views.list_uploads_history_contents),
     urls.path("api/thermal-files/download/", views.api_download_thermal_file_or_folder),
+    
+    # Phase 5: Job Monitoring API Endpoints
+    urls.path("api/processing-jobs/", views.list_processing_jobs, name="list_processing_jobs"),
+    urls.path("api/processing-jobs/<int:job_id>/", views.get_job_status, name="get_job_status"),
     # Django Administration
     urls.path("admin/", admin.site.urls),
 
