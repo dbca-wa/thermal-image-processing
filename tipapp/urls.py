@@ -22,6 +22,7 @@ from django import conf
 from django import urls
 from django.contrib import admin
 from django.contrib.auth import views as auth_views
+from django.views.generic import RedirectView
 
 
 # Local
@@ -41,15 +42,17 @@ def trigger_error(request):
 
 # Django URL Patterns
 urlpatterns = [
-    # Home Page
-    urls.path("", views.ThermalFilesDashboardView.as_view(), name="home"),
-    urls.path("files-dashboard", views.ThermalFilesDashboardView.as_view(), name="files-dashboard"),
-    urls.path("upload-files", views.ThermalFilesUploadView.as_view(), name="upload-files"),
+    # Home Page - Upload & Monitor is the main workflow entry point
+    urls.path("", views.UploadMonitorView.as_view(), name="home"),
+    
+    # Main Pages
     urls.path("upload-monitor", views.UploadMonitorView.as_view(), name="upload-monitor"),
+    urls.path("files-dashboard", views.ThermalFilesDashboardView.as_view(), name="files-dashboard"),
     urls.path("uploads-history", views.UploadsHistoryView.as_view(), name="uploads-history"),
     
-    # Phase 6: Processing Jobs Dashboard
-    urls.path("processing-jobs-dashboard", views.ProcessingJobsDashboardView.as_view(), name="processing-jobs-dashboard"),
+    # Redirects for old URLs (backwards compatibility)
+    urls.path("upload-files", RedirectView.as_view(pattern_name="upload-monitor", permanent=True), name="upload-files-redirect"),
+    urls.path("processing-jobs-dashboard", RedirectView.as_view(pattern_name="upload-monitor", permanent=True), name="processing-jobs-dashboard-redirect"),
     
     urls.path("api/upload-files/thermal_files/", views.api_upload_thermal_files),
     urls.path("api/upload-files/list_pending_imports/", views.list_pending_imports),
