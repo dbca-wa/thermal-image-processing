@@ -522,7 +522,48 @@ def unzip_and_prepare(full_filename_path, target_dirname=None):
         logger.info(f"Moving metadata file to {metadata_dest}")
         shutil.move(metadata_src, metadata_dest)
 
-    # 3. Unzip using 7z
+    # 3. Determine the actual directory name inside the 7z archive
+    # Use 7z list command to get the root directory name
+    try:
+        result = subprocess.run(
+            ['7z', 'l', target_7z_path],
+            capture_output=True,
+            text=True,
+            check=True
+        )
+        # Parse the output to find the root directory
+        # Look for lines like: "2023-02-04 06:51:12 D....            0            0  FireFlight_20230204_065112"
+        extracted_dirname = None
+        for line in result.stdout.split('\n'):
+            parts = line.split()
+            if len(parts) >= 6 and parts[2] == 'D....' and parts[5] and '/' not in parts[5]:
+                # This is a root-level directory
+                extracted_dirname = parts[5]
+                break
+        
+        if not extracted_dirname:
+            # Fallback: guess from filename
+            logger.warning("Could not detect directory from 7z listing, using filename-based guess")
+            basename_without_ext = os.path.splitext(filename)[0]
+            parts = basename_without_ext.split('.')
+            if len(parts) >= 2:
+                extracted_dirname = parts[0]
+            else:
+                extracted_dirname = os.path.splitext(basename_without_ext)[0]
+        
+        logger.info(f"Detected root directory in archive: {extracted_dirname}")
+    except Exception as e:
+        logger.error(f"Error detecting directory from archive: {e}")
+        # Fallback: guess from filename
+        basename_without_ext = os.path.splitext(filename)[0]
+        parts = basename_without_ext.split('.')
+        if len(parts) >= 2:
+            extracted_dirname = parts[0]
+        else:
+            extracted_dirname = os.path.splitext(basename_without_ext)[0]
+        logger.info(f"Using fallback directory name: {extracted_dirname}")
+    
+    # 4. Unzip using 7z
     logger.info(f"Uncompressing {filename}...")
     try:
         # -aoa: Overwrite All existing files without prompt
@@ -536,11 +577,24 @@ def unzip_and_prepare(full_filename_path, target_dirname=None):
         logger.error(f"7z extraction failed: {e.stderr.decode()}")
         raise
 
-    # 4. Remove the temporary .7z file
+    # 5. Remove the temporary .7z file
     os.remove(target_7z_path)
 
+    # 6. Build paths for renaming
+    extracted_path = os.path.join(processing_base_folder, extracted_dirname)
+    target_path = os.path.join(processing_base_folder, dirname)
+    
+    # 7. Rename the extracted directory if target_dirname was specified and differs
+    if extracted_dirname != dirname:
+        logger.info(f"Renaming extracted directory from {extracted_dirname} to {dirname}")
+        if os.path.exists(target_path):
+            # Remove target if it already exists (shouldn't happen, but be safe)
+            logger.warning(f"Target directory {target_path} already exists, removing it")
+            shutil.rmtree(target_path)
+        shutil.move(extracted_path, target_path)
+    
     # Return the full path to the extracted directory
-    return os.path.join(processing_base_folder, dirname)
+    return target_path
 
 
 # =========================================================
