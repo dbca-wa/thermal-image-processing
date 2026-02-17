@@ -65,7 +65,6 @@
                                 <th>Current Step</th>
                                 <th>Uploader</th>
                                 <th>Created</th>
-                                <th>Duration</th>
                                 <th>Actions</th>
                             </tr>
                         </thead>
@@ -217,10 +216,15 @@
 
         function refreshTable() {
             if (jobsTable) {
+                console.log('[Auto-refresh] Fetching jobs data...');
                 loadJobsData().then(jobs => {
+                    console.log(`[Auto-refresh] Loaded ${jobs.length} jobs`);
                     jobsTable.clear();
                     jobsTable.rows.add(jobs);
                     jobsTable.draw();
+                }).catch(error => {
+                    console.error('[Auto-refresh] Error refreshing table:', error);
+                    // Continue polling even if there's an error
                 });
             }
         }
@@ -322,23 +326,26 @@
                         }
                     },
                     { 
-                        data: 'duration_seconds',
-                        title: 'Duration',
-                        width: '100px',
-                        render: function(data, type, row) {
-                            return `<small>${formatDuration(data)}</small>`;
-                        }
-                    },
-                    { 
                         data: null,
                         title: 'Actions',
                         width: '240px',
                         orderable: false,
                         render: function(data, type, row) {
                             let buttons = `<button class="btn btn-sm btn-primary mb-1" onclick="showJobDetails(${row.id})">
-                                View Details
+                                <i class="bi bi-eye"></i> Details
                             </button>`;
                             
+                            // Add processed data link for completed jobs
+                            if (row.status === 'COMPLETED') {
+                                // Link to processed data page showing the flight folder
+                                // flight_name already includes suffix for duplicate uploads
+                                buttons += ` <a href="/files-dashboard?route_path=/${encodeURIComponent(row.flight_name)}" 
+                                               class="btn btn-sm btn-primary mb-1" 
+                                               title="View Processed Data">
+                                    <i class="bi bi-eye"></i> Processed Data
+                                </a>`;
+                            }
+
                             // Add download button for original file if file_path exists
                             if (row.file_path) {
                                 let downloadPath = row.file_path;
@@ -353,22 +360,11 @@
                                 </a>`;
                             }
                             
-                            // Add processed data link for completed jobs
-                            if (row.status === 'COMPLETED') {
-                                // Link to processed data page showing the flight folder
-                                // flight_name already includes suffix for duplicate uploads
-                                buttons += ` <a href="/files-dashboard?route_path=/${encodeURIComponent(row.flight_name)}" 
-                                               class="btn btn-sm btn-primary mb-1" 
-                                               title="View Processed Data">
-                                    Processed Data
-                                </a>`;
-                            }
-                            
                             return buttons;
                         }
                     }
                 ],
-                order: [[7, 'desc']], // Sort by created_at descending
+                order: [[7, 'desc']], // Sort by Created descending (newest first)
                 pageLength: 25,
                 lengthMenu: [[10, 25, 50, 100, -1], [10, 25, 50, 100, "All"]],
                 language: {

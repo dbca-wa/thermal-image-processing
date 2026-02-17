@@ -117,40 +117,39 @@ class ImportsProcessor():
                     print(f"  -> Thermal processing pipeline completed successfully.")
                     logger.info(f"Successfully finished processing for: {filename}")
                     
-                    # Phase 3: Update job status to COMPLETED
+                    # Phase 3: Job status has already been updated by run_thermal_processing
+                    # No need to update here as it may have been set to FAILED if there were errors
                     if job:
                         try:
-                            # Refresh from DB to get latest values set by run_thermal_processing
                             job.refresh_from_db()
-                            job.status = 'COMPLETED'
-                            job.processing_completed_at = timezone.now()
-                            job.current_step = 'Processing completed successfully'
-                            job.progress_percentage = 100
-                            # Save only the fields we're updating to preserve processing results
-                            job.save(update_fields=['status', 'processing_completed_at', 'current_step', 'progress_percentage'])
-                            logger.info(f"Job {job.id} status updated to COMPLETED")
+                            logger.info(f"Job {job.id} final status: {job.status}")
                         except Exception as e:
-                            logger.error(f"Error updating job completion status: {e}", exc_info=True)
+                            logger.error(f"Error refreshing job status: {e}", exc_info=True)
                     
-                    print(f"  => SUCCESS: Finished processing {filename}")
+                    print(f"  => FINISHED: Processing {filename} with status: {job.status if job else 'N/A'}")
 
                 # Since we are running python code directly, we catch standard Exceptions
                 except Exception as e:
                     print(f"  => ERROR: An error occurred while processing {filename}: {e}")
                     logger.error(f"Error processing file {filename}: {e}", exc_info=True)
                     
-                    # Phase 3: Update job status to FAILED
+                    # Phase 3: Check if job status was already set by run_thermal_processing
                     if job:
                         try:
                             # Refresh from DB to get latest values
                             job.refresh_from_db()
-                            job.status = 'FAILED'
-                            job.processing_completed_at = timezone.now()
-                            job.error_message = str(e)
-                            job.current_step = 'Processing failed'
-                            # Save only the fields we're updating
-                            job.save(update_fields=['status', 'processing_completed_at', 'error_message', 'current_step'])
-                            logger.info(f"Job {job.id} status updated to FAILED")
+                            
+                            # Only update if not already set to FAILED by run_thermal_processing
+                            if job.status != 'FAILED':
+                                job.status = 'FAILED'
+                                job.processing_completed_at = timezone.now()
+                                job.error_message = str(e)
+                                job.current_step = 'Processing failed'
+                                # Save only the fields we're updating
+                                job.save(update_fields=['status', 'processing_completed_at', 'error_message', 'current_step'])
+                                logger.info(f"Job {job.id} status updated to FAILED")
+                            else:
+                                logger.info(f"Job {job.id} already marked as FAILED by run_thermal_processing")
                         except Exception as update_error:
                             logger.error(f"Error updating job failure status: {update_error}", exc_info=True)
 

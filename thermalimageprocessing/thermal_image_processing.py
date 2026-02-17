@@ -858,15 +858,19 @@ def run_thermal_processing(flight_path_arg, job_id=None):
                 if 'footprint' in locals() and hasattr(footprint, 'districts'):
                     job.districts_covered = footprint.districts
                 
-                # Update status if not already set by ImportsProcessor
-                if success and job.status != 'COMPLETED':
-                    job.status = 'COMPLETED'
-                    job.processing_completed_at = timezone.now()
+                # Update status and progress based on success
+                if success:
+                    if job.status != 'COMPLETED':
+                        job.status = 'COMPLETED'
+                        job.processing_completed_at = timezone.now()
                     job.progress_percentage = 100
-                elif not success and job.status != 'FAILED':
-                    job.status = 'FAILED'
-                    job.processing_completed_at = timezone.now()
+                    job.current_step = 'Processing completed successfully'
+                else:
+                    if job.status != 'FAILED':
+                        job.status = 'FAILED'
+                        job.processing_completed_at = timezone.now()
                     job.error_message = error_details
+                    job.current_step = 'Processing failed'
                 
                 job.save()
                 logger.info(f"Job {job.id} final results saved: status={job.status}, images={job.total_images_processed}, hotspots={job.hotspots_detected}")
@@ -881,6 +885,10 @@ def run_thermal_processing(flight_path_arg, job_id=None):
         if 'file_handler' in locals() and file_handler in logger.handlers:
             logger.removeHandler(file_handler)
             file_handler.close()
+    
+    # Re-raise exception if processing failed so caller (imports_processor) knows about it
+    if not success:
+        raise Exception(error_details if 'error_details' in locals() else "Processing failed")
 
 # =========================================================
 # Legacy Support: Allows running from command line (like .sh)
