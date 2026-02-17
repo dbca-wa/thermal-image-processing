@@ -54,22 +54,6 @@ class ThermalFilesDashboardView(base.TemplateView):
         }
         return shortcuts.render(request, self.template_name, context)
 
-class ThermalFilesUploadView(base.TemplateView):
-    """Thermal files upload."""
-
-    # Template name
-    template_name = "govapp/thermal-files/upload-files.html"
-
-    def get(self, request: http.HttpRequest, *args: Any, **kwargs: Any) -> http.HttpResponse:
-        # Construct Context
-        context: dict[str, Any] = {
-            'has_view_permission': IsInAdminOrOfficersGroup().has_permission(request, self),
-            'has_upload_permission': IsInAdministratorsGroup().has_permission(request, self),
-        }
-
-        return shortcuts.render(request, self.template_name, context)
-
-
 class UploadMonitorView(base.TemplateView):
     """Combined upload and processing jobs monitor view."""
 
@@ -613,26 +597,3 @@ def get_job_status(request, job_id, *args, **kwargs):
     }
     
     return JsonResponse(response_data)
-
-
-# ============================================================================
-# Phase 6: Processing Jobs Dashboard View
-# ============================================================================
-
-class ProcessingJobsDashboardView(base.TemplateView):
-    """
-    Dashboard view for monitoring thermal processing jobs.
-    Displays a list of all jobs with real-time status updates.
-    """
-    template_name = "govapp/processing-jobs-dashboard.html"
-
-    def get(self, request: http.HttpRequest, *args: Any, **kwargs: Any) -> http.HttpResponse:
-        """Render the processing jobs dashboard page."""
-        from tipapp.permissions import has_admin_or_officer_permission
-        from django.conf import settings
-        
-        context: dict[str, Any] = {
-            'has_permission': has_admin_or_officer_permission(request),
-            'auto_refresh_interval': settings.DASHBOARD_AUTO_REFRESH_INTERVAL,
-        }
-        return shortcuts.render(request, self.template_name, context)
