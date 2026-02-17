@@ -141,7 +141,12 @@
             const hours = Math.floor(seconds / 3600);
             const minutes = Math.floor((seconds % 3600) / 60);
             const secs = Math.floor(seconds % 60);
-            return `${hours}h ${minutes}m ${secs}s`;
+            
+            if (hours > 0) {
+                return `${hours}h ${minutes}m ${secs}s`;
+            } else {
+                return `${minutes}m ${secs}s`;
+            }
         }
 
         function formatFileSize(bytes) {
@@ -327,11 +332,11 @@
                     { 
                         data: null,
                         title: 'Actions',
-                        width: '180px',
+                        width: '240px',
                         orderable: false,
                         render: function(data, type, row) {
                             let buttons = `<button class="btn btn-sm btn-primary mb-1" onclick="showJobDetails(${row.id})">
-                                <i class="bi bi-eye"></i> View
+                                View Details
                             </button>`;
                             
                             // Add download button for original file if file_path exists
@@ -344,7 +349,18 @@
                                 buttons += ` <a href="/api/thermal-files/download/?file_path=${encodeURIComponent(downloadPath)}" 
                                                class="btn btn-sm btn-primary mb-1" 
                                                title="Download Original File">
-                                    <i class="bi bi-download"></i> Download
+                                    <i class="bi bi-download"></i> Original File 
+                                </a>`;
+                            }
+                            
+                            // Add processed data link for completed jobs
+                            if (row.status === 'COMPLETED') {
+                                // Link to processed data page showing the flight folder
+                                // flight_name already includes suffix for duplicate uploads
+                                buttons += ` <a href="/files-dashboard?route_path=/${encodeURIComponent(row.flight_name)}" 
+                                               class="btn btn-sm btn-primary mb-1" 
+                                               title="View Processed Data">
+                                    Processed Data
                                 </a>`;
                             }
                             

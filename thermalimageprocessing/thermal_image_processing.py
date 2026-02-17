@@ -461,10 +461,14 @@ def publish_image_on_geoserver(flight_name, image_name=None):
         error_msg = f"Exception during Layer publication: {e}"
         logger.error(error_msg, exc_info=True)
 
-def unzip_and_prepare(full_filename_path):
+def unzip_and_prepare(full_filename_path, target_dirname=None):
     """
     Handles file preparation: copying, moving, and unzipping.
     Replaces the functionality of the shell script.
+    
+    Args:
+        full_filename_path: Full path to the file to process
+        target_dirname: Optional target directory name (used for duplicate uploads with suffix)
     """
     # Get the base directory of the project
     # base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -472,9 +476,14 @@ def unzip_and_prepare(full_filename_path):
     filename = os.path.basename(full_filename_path)
     
     # Logic to determine directory name (Removing extension and timestamp)
-    basename_without_ext = os.path.splitext(filename)[0]
-    # Assuming format Name.timestamp -> Name
-    dirname = os.path.splitext(basename_without_ext)[0]
+    if target_dirname:
+        # Use provided directory name (for duplicate uploads with suffix)
+        dirname = target_dirname
+    else:
+        # Default behavior: extract from filename
+        basename_without_ext = os.path.splitext(filename)[0]
+        # Assuming format Name.timestamp -> Name
+        dirname = os.path.splitext(basename_without_ext)[0]
 
     logger.info(f"Preparing to process: {filename}")
     logger.info(f"Target directory name: {dirname}")
