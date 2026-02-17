@@ -89,7 +89,7 @@ class UploadMonitorView(base.TemplateView):
 
 
 class UploadsHistoryView(base.TemplateView):
-    """Thermal files uploaded after processing."""
+    """Archives view - Browse original uploaded source files (.7z, .zip) before processing."""
 
     # Template name
     template_name = "govapp/thermal-files/uploads-history.html"
