@@ -402,7 +402,7 @@
             });
 
             // Start auto-refresh (interval from settings)
-            const refreshInterval = {{ auto_refresh_interval|default:5 }} * 1000;
+            const refreshInterval = {{ auto_refresh_interval|default:3 }} * 1000;
             autoRefreshInterval = setInterval(refreshTable, refreshInterval);
             
             console.log('DataTable initialized with', refreshInterval / 1000, 'seconds auto-refresh');
