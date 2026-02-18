@@ -44,7 +44,7 @@ class HomePage(base.TemplateView):
 
 
 class ThermalFilesDashboardView(base.TemplateView):
-    """Thermal files view."""
+    """Processed data view - Browse and download completed thermal processing results."""
     template_name = "govapp/thermal-files/dashboard.html"
 
     def get(self, request: http.HttpRequest, *args: Any, **kwargs: Any) -> http.HttpResponse:
@@ -54,24 +54,26 @@ class ThermalFilesDashboardView(base.TemplateView):
         }
         return shortcuts.render(request, self.template_name, context)
 
-class ThermalFilesUploadView(base.TemplateView):
-    """Thermal files upload."""
+class UploadMonitorView(base.TemplateView):
+    """Combined upload and processing jobs monitor view."""
 
-    # Template name
-    template_name = "govapp/thermal-files/upload-files.html"
+    template_name = "govapp/upload-monitor.html"
 
     def get(self, request: http.HttpRequest, *args: Any, **kwargs: Any) -> http.HttpResponse:
+        from django.conf import settings
+        
         # Construct Context
         context: dict[str, Any] = {
             'has_view_permission': IsInAdminOrOfficersGroup().has_permission(request, self),
             'has_upload_permission': IsInAdministratorsGroup().has_permission(request, self),
+            'auto_refresh_interval': settings.DASHBOARD_AUTO_REFRESH_INTERVAL,
         }
 
         return shortcuts.render(request, self.template_name, context)
 
 
 class UploadsHistoryView(base.TemplateView):
-    """Thermal files uploaded after processing."""
+    """Archives view - Browse original uploaded source files (.7z, .zip) before processing."""
 
     # Template name
     template_name = "govapp/thermal-files/uploads-history.html"
@@ -114,6 +116,8 @@ def list_thermal_folder_contents(request, *args, **kwargs):
     page_param = request.GET.get('page', '1')
     page_size_param = request.GET.get('page_size', '10')
     search_term = request.GET.get('search', '')
+    sort_by = request.GET.get('sort_by', 'name')
+    sort_order = request.GET.get('sort_order', 'asc')
     
     # The path provided by the user/frontend, relative to the data storage root.
     relative_path_from_user = request.GET.get('route_path', '')
@@ -143,16 +147,15 @@ def list_thermal_folder_contents(request, *args, **kwargs):
     # --- Retrieve and paginate the file list ---
     try:
         # Pass the safe, absolute path to the function that gets the files.
-        file_list = get_thermal_files(final_abs_path, int(page_param) - 1, int(page_size_param), search_term)
-        
-        paginator = Paginator(file_list, page_size_param)
-        page = paginator.page(page_param)
+        page_num = int(page_param)
+        page_size = int(page_size_param)
+        file_list, total_count = get_thermal_files(final_abs_path, page_num - 1, page_size, search_term, sort_by, sort_order)
         
         return JsonResponse({
-            "count": paginator.count,
-            "hasPrevious": page.has_previous(),
-            "hasNext": page.has_next(),
-            'results': page.object_list,
+            "count": total_count,
+            "hasPrevious": page_num > 1,
+            "hasNext": page_num * page_size < total_count,
+            'results': file_list,
         })
     except Exception as e:
         logger.error(f"Error retrieving file list for '{final_abs_path}': {e}", exc_info=True)
@@ -167,20 +170,22 @@ def list_uploads_history_contents(request, *args, **kwargs):
     page_size_param = request.GET.get('page_size', '10')
     route_path = request.GET.get('route_path', '')
     search = request.GET.get('search', '')
+    sort_by = request.GET.get('sort_by', 'name')
+    sort_order = request.GET.get('sort_order', 'asc')
 
     dir_path = route_path if route_path.startswith(dir_path) else os.path.join(dir_path, route_path)
 
     if not os.path.exists(dir_path):
         return JsonResponse({'error': f'Path [{dir_path}] does not exist.'}, status=400)
 
-    file_list = get_thermal_files(dir_path, int(page_param) - 1, int(page_size_param), search)
-    paginator = Paginator(file_list, page_size_param)
-    page = paginator.page(page_param)
+    page_num = int(page_param)
+    page_size = int(page_size_param)
+    file_list, total_count = get_thermal_files(dir_path, page_num - 1, page_size, search, sort_by, sort_order)
     return JsonResponse({
-        "count": paginator.count,
-        "hasPrevious": page.has_previous(),
-        "hasNext": page.has_next(),
-        'results': page.object_list,
+        "count": total_count,
+        "hasPrevious": page_num > 1,
+        "hasNext": page_num * page_size < total_count,
+        'results': file_list,
     })
 
 @api_view(["POST"])
@@ -205,6 +210,66 @@ def api_upload_thermal_files(request, *args, **kwargs):
             for chunk in uploaded_file.chunks():
                 destination.write(chunk)
         logger.info(f"File: [{uploaded_file.name}] has been successfully saved at [{save_path}].")
+        
+        # Create metadata file to track who uploaded this file
+        import json
+        from datetime import datetime, timezone
+        metadata_path = save_path + '.meta.json'
+        metadata = {
+            'uploaded_by': request.user.email if hasattr(request.user, 'email') else str(request.user),
+            'uploaded_by_username': request.user.username if hasattr(request.user, 'username') else str(request.user),
+            'uploaded_at': datetime.now(timezone.utc).isoformat(),
+            'original_filename': uploaded_file.name,
+            'saved_filename': newFileName,
+        }
+        with open(metadata_path, 'w') as f:
+            json.dump(metadata, f, indent=2)
+        logger.info(f"Metadata file created: [{metadata_path}]")
+        
+        # Phase 2: Create job record for tracking
+        from tipapp.models import ThermalProcessingJob
+        
+        # Extract flight name from filename (remove extensions and timestamp)
+        # Example: FireFlight_20211203_052327.20260213_155626.7z -> FireFlight_20211203_052327
+        flight_name = newFileName
+        # Remove .7z or .zip extension
+        if flight_name.lower().endswith('.7z'):
+            flight_name = flight_name[:-3]
+        elif flight_name.lower().endswith('.zip'):
+            flight_name = flight_name[:-4]
+        # Remove timestamp if present (format: .YYYYMMDD_HHMMSS)
+        import re
+        flight_name = re.sub(r'\.\d{8}_\d{6}$', '', flight_name)
+        
+        # Check for duplicate flight_name and add suffix if necessary
+        base_flight_name = flight_name
+        counter = 1
+        while ThermalProcessingJob.objects.filter(flight_name=flight_name).exists():
+            counter += 1
+            flight_name = f"{base_flight_name}_{counter}"
+        
+        if counter > 1:
+            logger.info(f"Duplicate flight name detected. Using '{flight_name}' instead of '{base_flight_name}'")
+        
+        try:
+            # Get file size
+            file_size = os.path.getsize(save_path)
+            
+            # Create job record
+            job = ThermalProcessingJob.objects.create(
+                flight_name=flight_name,
+                original_filename=uploaded_file.name,
+                status='QUEUED',  # File is in pending_imports, ready for processing
+                file_size=file_size,
+                file_path=save_path,
+                uploaded_by=request.user if request.user.is_authenticated else None,
+                uploaded_by_email=request.user.email if hasattr(request.user, 'email') else '',
+            )
+            logger.info(f"Job record created: ID={job.id}, Flight={flight_name}, Status={job.status}")
+        except Exception as e:
+            # Log error but don't fail the upload
+            logger.error(f"Failed to create job record for {flight_name}: {e}", exc_info=True)
+        
         file_info = get_file_record(settings.PENDING_IMPORT_PATH, newFileName)
         return JsonResponse({'message': 'File(s) uploaded successfully.', 'data' : file_info})
     else:
@@ -268,7 +333,8 @@ def api_download_thermal_file_or_folder(request, *args, **kwargs):
     #    These are the only top-level directories this view is allowed to serve files from.
     allowed_base_paths = [
         os.path.abspath(settings.DATA_STORAGE),
-        os.path.abspath(settings.UPLOADS_HISTORY_PATH)
+        os.path.abspath(settings.UPLOADS_HISTORY_PATH),
+        os.path.abspath(settings.PENDING_IMPORT_PATH)
     ]
 
     # 2. Normalize the user-provided path to resolve any '..' components and get the real absolute path.
@@ -384,3 +450,163 @@ def management_command_runner_page_view(request):
     }
     
     return shortcuts.render(request, template_name, context)
+
+# ============================================================================
+# Phase 5: Job Monitoring API Endpoints
+# ============================================================================
+
+@api_view(["GET"])
+@permission_classes([IsInAdminOrOfficersGroup])
+def list_processing_jobs(request, *args, **kwargs):
+    """
+    List all thermal processing jobs with filtering and pagination.
+    
+    Query Parameters:
+        - status: Filter by job status (UPLOADED, QUEUED, PROCESSING, COMPLETED, FAILED)
+        - user_email: Filter by uploader email
+        - page: Page number (default: 1)
+        - page_size: Items per page (default: 20)
+        - sort_by: Sort field (default: -created_at)
+    
+    Returns:
+        JSON response with job list and pagination info
+    """
+    from tipapp.models import ThermalProcessingJob
+    
+    # Get all jobs
+    jobs = ThermalProcessingJob.objects.all()
+    
+    # Apply filters
+    status_filter = request.GET.get('status', '').strip()
+    if status_filter:
+        jobs = jobs.filter(status=status_filter)
+    
+    user_email_filter = request.GET.get('user_email', '').strip()
+    if user_email_filter:
+        jobs = jobs.filter(uploaded_by_email__icontains=user_email_filter)
+    
+    # Apply sorting
+    sort_by = request.GET.get('sort_by', '-created_at')
+    jobs = jobs.order_by(sort_by)
+    
+    # Pagination
+    page_param = request.GET.get('page', '1')
+    page_size_param = request.GET.get('page_size', '20')
+    
+    try:
+        page_num = int(page_param)
+        page_size = int(page_size_param)
+    except ValueError:
+        return JsonResponse({'error': 'Invalid page or page_size parameter'}, status=400)
+    
+    paginator = Paginator(jobs, page_size)
+    
+    try:
+        page = paginator.page(page_num)
+    except Exception as e:
+        return JsonResponse({'error': f'Invalid page number: {str(e)}'}, status=400)
+    
+    # Serialize job data
+    jobs_data = []
+    for job in page.object_list:
+        # Calculate processing duration if available
+        duration_seconds = None
+        if job.processing_started_at and job.processing_completed_at:
+            duration = job.processing_completed_at - job.processing_started_at
+            duration_seconds = duration.total_seconds()
+        
+        jobs_data.append({
+            'id': job.id,
+            'flight_name': job.flight_name,
+            'original_filename': job.original_filename,
+            'status': job.status,
+            'status_display': job.get_status_display(),
+            'progress_percentage': job.progress_percentage,
+            'current_step': job.current_step,
+            'uploaded_by_email': job.uploaded_by_email,
+            'file_size': job.file_size,
+            'file_path': job.file_path,
+            'created_at': job.created_at.isoformat(),
+            'processing_started_at': job.processing_started_at.isoformat() if job.processing_started_at else None,
+            'processing_completed_at': job.processing_completed_at.isoformat() if job.processing_completed_at else None,
+            'duration_seconds': duration_seconds,
+            'total_images_processed': job.total_images_processed,
+            'hotspots_detected': job.hotspots_detected,
+            'districts_covered': job.districts_covered,
+            'error_message': job.error_message if job.status == 'FAILED' else None,
+        })
+    
+    return JsonResponse({
+        'count': paginator.count,
+        'num_pages': paginator.num_pages,
+        'current_page': page_num,
+        'page_size': page_size,
+        'has_previous': page.has_previous(),
+        'has_next': page.has_next(),
+        'results': jobs_data,
+    })
+
+
+@api_view(["GET"])
+@permission_classes([IsInAdminOrOfficersGroup])
+def get_job_status(request, job_id, *args, **kwargs):
+    """
+    Get detailed status information for a specific job.
+    
+    Args:
+        job_id: The ID of the thermal processing job
+    
+    Returns:
+        JSON response with detailed job information
+    """
+    from tipapp.models import ThermalProcessingJob
+    
+    try:
+        job = ThermalProcessingJob.objects.get(id=job_id)
+    except ThermalProcessingJob.DoesNotExist:
+        return JsonResponse({'error': 'Job not found'}, status=404)
+    except ValueError:
+        return JsonResponse({'error': 'Invalid job ID'}, status=400)
+    
+    # Calculate processing duration if available
+    duration_seconds = None
+    duration_formatted = None
+    if job.processing_started_at and job.processing_completed_at:
+        duration = job.processing_completed_at - job.processing_started_at
+        duration_seconds = duration.total_seconds()
+        # Format duration as HH:MM:SS
+        hours = int(duration_seconds // 3600)
+        minutes = int((duration_seconds % 3600) // 60)
+        seconds = int(duration_seconds % 60)
+        duration_formatted = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+    
+    # Build detailed response
+    response_data = {
+        'id': job.id,
+        'flight_name': job.flight_name,
+        'original_filename': job.original_filename,
+        'status': job.status,
+        'status_display': job.get_status_display(),
+        'progress_percentage': job.progress_percentage,
+        'current_step': job.current_step,
+        'file_size': job.file_size,
+        'file_path': job.file_path,
+        'uploaded_by_email': job.uploaded_by_email,
+        'created_at': job.created_at.isoformat(),
+        'updated_at': job.updated_at.isoformat(),
+        'processing_started_at': job.processing_started_at.isoformat() if job.processing_started_at else None,
+        'processing_completed_at': job.processing_completed_at.isoformat() if job.processing_completed_at else None,
+        'duration_seconds': duration_seconds,
+        'duration_formatted': duration_formatted,
+        'output_geopackage_path': job.output_geopackage_path,
+        'log_file_path': job.log_file_path,
+        'total_images_processed': job.total_images_processed,
+        'hotspots_detected': job.hotspots_detected,
+        'districts_covered': job.districts_covered,
+        'error_message': job.error_message,
+        'is_processing': job.is_processing(),
+        'is_completed': job.is_completed(),
+        'is_failed': job.is_failed(),
+    }
+    
+    return JsonResponse(response_data)

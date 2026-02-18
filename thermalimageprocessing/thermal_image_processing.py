@@ -158,7 +158,16 @@ def translate_png2tif(input_png, short_file, flight_name):
     # Translates png to tif
     output_tif = input_png.replace(".png", ".tif")
     tif_filename = short_file.replace(".png", ".tif")
-    gdal.Translate(output_tif, input_png, outputSRS="EPSG:28350")
+    
+    logger.info(f"Converting PNG to TIF: {short_file}")
+    
+    try:
+        gdal.Translate(output_tif, input_png, outputSRS="EPSG:28350")
+        logger.info(f"Successfully converted: {short_file} -> {tif_filename}")
+    except Exception as e:
+        logger.error(f"Failed to convert {short_file} to TIF: {e}", exc_info=True)
+        raise  # Re-raise to let the caller handle it
+    
     relative_path = flight_name + "_images/" + tif_filename
     copy_to_geoserver_storage(output_tif, relative_path)
     #publish_image_on_geoserver(flight_name, tif_filename)
@@ -166,42 +175,60 @@ def translate_png2tif(input_png, short_file, flight_name):
 def copy_to_geoserver_storage(source_file, relative_dest_path):
     """
     Copies the processed image file to the shared storage mount for GeoServer.
+    
+    Args:
+        source_file: Absolute path to the source file to copy
+        relative_dest_path: Relative path within the GeoServer storage mount
+        
+    Raises:
+        FileNotFoundError: If source file does not exist
+        OSError: If file copy operation fails
     """
     try:
+        # Validate that source file exists before attempting copy
+        if not os.path.exists(source_file):
+            error_msg = f"Source file does not exist: {source_file}"
+            logger.error(error_msg)
+            raise FileNotFoundError(error_msg)
+        
         # Define the target base path
         mount_base_path = "/rclone-mounts/thermalimaging-flightmosaics"
         
         # Construct the full destination path
-        # blob_name is used here as the relative path (e.g., 'FlightName.tif' or 'FlightName_images/xxx.tif')
+        # relative_dest_path format: 'FlightName.tif' or 'FlightName_images/xxx.tif'
         dest_path = os.path.join(mount_base_path, relative_dest_path)
 
-        try:
-            file_size = os.path.getsize(source_file)
-            file_size_mb = file_size / (1024 * 1024) # Convert to MB
-            logger.info(f"Copying file ({file_size_mb:.2f} MB) to GeoServer storage...")
-        except OSError:
-            # Handle cases where file might not exist yet (though unlikely here)
-            logger.warning(f"Copying file to GeoServer storage (Size unknown).")
+        # Log file size for tracking
+        file_size = os.path.getsize(source_file)
+        file_size_mb = file_size / (1024 * 1024)  # Convert to MB
+        logger.info(f"Copying file ({file_size_mb:.2f} MB) to GeoServer storage...")
+        logger.info(f"  Source: {source_file}")
+        logger.info(f"  Destination: {dest_path}")
 
-        logger.info(f"Source: {source_file}")
-        logger.info(f"Destination: {dest_path}")
-
-        # Extract the directory path
+        # Create destination directory if it doesn't exist
         dest_dir = os.path.dirname(dest_path)
-        
-        # Create the directory if it does not exist
         if not os.path.exists(dest_dir):
+            logger.info(f"Creating destination directory: {dest_dir}")
             os.makedirs(dest_dir, exist_ok=True)
         
-        # Copy the image file to the destination
+        # Perform the file copy operation
         shutil.copyfile(source_file, dest_path)
-
-        logger.info(f"Copy complete.") 
+        
+        # Verify the copy was successful by checking destination file exists
+        if os.path.exists(dest_path):
+            dest_size = os.path.getsize(dest_path)
+            if dest_size == file_size:
+                logger.info(f"Copy complete and verified: {os.path.basename(dest_path)}")
+            else:
+                logger.warning(f"Copy completed but file size mismatch: source={file_size}, dest={dest_size}")
+        else:
+            raise OSError(f"Copy operation reported success but destination file not found: {dest_path}")
         
     except Exception as e:
-        error_msg = f"Failed to copy file to rclone mount: {e}"
-        # Log the error with full stack trace
+        error_msg = f"Failed to copy file to GeoServer storage: {e}"
         logger.error(error_msg, exc_info=True)
+        # Re-raise the exception so caller can handle it appropriately
+        raise
 
 
 def create_mosaic_footprint_as_line(files, raw_img_folder, flight_timestamp, image, engine, footprint, output_geopackage):
@@ -373,25 +400,6 @@ def create_boundaries_and_centroids(flight_timestamp, kml_boundaries_file, bboxe
     finally:
         return sorted(all_images_with_hotspots)
 
-def send_notification_emails(flight_name, success, msg, districts=[]):
-    postmark = PostmarkClient(server_token=config.get('general', 'server_token'))
-    recipients = os.environ.get('email_always_email') # config.get('emails', 'always_email')
-    if not success:
-        postmark.emails.send(
-            From='patrick.maslen@dbca.wa.gov.au',
-            To=recipients,
-            Subject='New Thermal Image data FAILED to complete processing',
-            HtmlBody='Automated email advising that a new dataset,' + flight_name + ', has arrived but has not been successfully processed on kens-therm-001.<br>' + msg
-        )
-    else:
-        for district in districts:
-            recipients += ', ' + os.environ.get('email_'+district) #config.get('emails', district)
-        postmark.emails.send(
-                From=os.environ.get('email_from_address','no-reply@dbca.wa.gov.au'),
-                To=recipients,
-                Subject='New Thermal Image data available',
-                HtmlBody='Automated email advising that a new dataset,' + flight_name + ', has arrived and has been successfully processed; it can be viewed in SSS.<br>' + msg)
-
 def publish_image_on_geoserver(flight_name, image_name=None):
     logger.info(f'Publishing to GeoServer... Flight: {flight_name}, Image: {image_name}')
 
@@ -453,10 +461,14 @@ def publish_image_on_geoserver(flight_name, image_name=None):
         error_msg = f"Exception during Layer publication: {e}"
         logger.error(error_msg, exc_info=True)
 
-def unzip_and_prepare(full_filename_path):
+def unzip_and_prepare(full_filename_path, target_dirname=None):
     """
     Handles file preparation: copying, moving, and unzipping.
     Replaces the functionality of the shell script.
+    
+    Args:
+        full_filename_path: Full path to the file to process
+        target_dirname: Optional target directory name (used for duplicate uploads with suffix)
     """
     # Get the base directory of the project
     # base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -464,9 +476,14 @@ def unzip_and_prepare(full_filename_path):
     filename = os.path.basename(full_filename_path)
     
     # Logic to determine directory name (Removing extension and timestamp)
-    basename_without_ext = os.path.splitext(filename)[0]
-    # Assuming format Name.timestamp -> Name
-    dirname = os.path.splitext(basename_without_ext)[0]
+    if target_dirname:
+        # Use provided directory name (for duplicate uploads with suffix)
+        dirname = target_dirname
+    else:
+        # Default behavior: extract from filename
+        basename_without_ext = os.path.splitext(filename)[0]
+        # Assuming format Name.timestamp -> Name
+        dirname = os.path.splitext(basename_without_ext)[0]
 
     logger.info(f"Preparing to process: {filename}")
     logger.info(f"Target directory name: {dirname}")
@@ -497,8 +514,56 @@ def unzip_and_prepare(full_filename_path):
          os.makedirs(settings.UPLOADS_HISTORY_PATH, exist_ok=True)
          
     shutil.move(full_filename_path, dest_move_path)
+    
+    # Also move the metadata file if it exists
+    metadata_src = full_filename_path + '.meta.json'
+    if os.path.exists(metadata_src):
+        metadata_dest = dest_move_path + '.meta.json'
+        logger.info(f"Moving metadata file to {metadata_dest}")
+        shutil.move(metadata_src, metadata_dest)
 
-    # 3. Unzip using 7z
+    # 3. Determine the actual directory name inside the 7z archive
+    # Use 7z list command to get the root directory name
+    try:
+        result = subprocess.run(
+            ['7z', 'l', target_7z_path],
+            capture_output=True,
+            text=True,
+            check=True
+        )
+        # Parse the output to find the root directory
+        # Look for lines like: "2023-02-04 06:51:12 D....            0            0  FireFlight_20230204_065112"
+        extracted_dirname = None
+        for line in result.stdout.split('\n'):
+            parts = line.split()
+            if len(parts) >= 6 and parts[2] == 'D....' and parts[5] and '/' not in parts[5]:
+                # This is a root-level directory
+                extracted_dirname = parts[5]
+                break
+        
+        if not extracted_dirname:
+            # Fallback: guess from filename
+            logger.warning("Could not detect directory from 7z listing, using filename-based guess")
+            basename_without_ext = os.path.splitext(filename)[0]
+            parts = basename_without_ext.split('.')
+            if len(parts) >= 2:
+                extracted_dirname = parts[0]
+            else:
+                extracted_dirname = os.path.splitext(basename_without_ext)[0]
+        
+        logger.info(f"Detected root directory in archive: {extracted_dirname}")
+    except Exception as e:
+        logger.error(f"Error detecting directory from archive: {e}")
+        # Fallback: guess from filename
+        basename_without_ext = os.path.splitext(filename)[0]
+        parts = basename_without_ext.split('.')
+        if len(parts) >= 2:
+            extracted_dirname = parts[0]
+        else:
+            extracted_dirname = os.path.splitext(basename_without_ext)[0]
+        logger.info(f"Using fallback directory name: {extracted_dirname}")
+    
+    # 4. Unzip using 7z
     logger.info(f"Uncompressing {filename}...")
     try:
         # -aoa: Overwrite All existing files without prompt
@@ -512,24 +577,64 @@ def unzip_and_prepare(full_filename_path):
         logger.error(f"7z extraction failed: {e.stderr.decode()}")
         raise
 
-    # 4. Remove the temporary .7z file
+    # 5. Remove the temporary .7z file
     os.remove(target_7z_path)
 
+    # 6. Build paths for renaming
+    extracted_path = os.path.join(processing_base_folder, extracted_dirname)
+    target_path = os.path.join(processing_base_folder, dirname)
+    
+    # 7. Rename the extracted directory if target_dirname was specified and differs
+    if extracted_dirname != dirname:
+        logger.info(f"Renaming extracted directory from {extracted_dirname} to {dirname}")
+        if os.path.exists(target_path):
+            # Remove target if it already exists (shouldn't happen, but be safe)
+            logger.warning(f"Target directory {target_path} already exists, removing it")
+            shutil.rmtree(target_path)
+        shutil.move(extracted_path, target_path)
+    
     # Return the full path to the extracted directory
-    return os.path.join(processing_base_folder, dirname)
+    return target_path
 
 
 # =========================================================
 # Main processing logic wrapper
 # =========================================================
-def run_thermal_processing(flight_path_arg):
+def run_thermal_processing(flight_path_arg, job_id=None):
     """
     Main entry point for thermal image processing.
+    
+    Args:
+        flight_path_arg: Full path to the extracted flight data directory
+        job_id: Optional ThermalProcessingJob ID for status tracking (Phase 3)
     """
     # Argument is now the full path
     flight_name = os.path.basename(flight_path_arg)
     flight_timestamp = flight_name.replace("FireFlight_", "")
     main_folder = flight_path_arg
+    
+    # Phase 3: Get job object if job_id provided
+    job = None
+    if job_id:
+        try:
+            from tipapp.models import ThermalProcessingJob
+            job = ThermalProcessingJob.objects.get(id=job_id)
+            logger.info(f"Processing with job tracking: Job ID={job_id}")
+        except Exception as e:
+            logger.warning(f"Could not retrieve job {job_id}: {e}")
+            job = None
+    
+    # Phase 4: Helper function to update job progress
+    def update_job_progress(step_description, percentage):
+        """Update job progress if job tracking is enabled"""
+        if job:
+            try:
+                job.current_step = step_description
+                job.progress_percentage = percentage
+                job.save(update_fields=['current_step', 'progress_percentage', 'updated_at'])
+                logger.info(f"Job progress: {percentage}% - {step_description}")
+            except Exception as e:
+                logger.error(f"Error updating job progress: {e}", exc_info=True)
 
     # Set filepaths
     raw_img_folder = os.path.join(main_folder, "PNGs/CAMERA1")
@@ -561,8 +666,33 @@ def run_thermal_processing(flight_path_arg):
     # does not prevent the main processing from running.
     try:
         logger.info(">>> Sending 'Processing Started' notification email...")
-        # email_sender.send_processing_started_notification(flight_name)
-        emails.send_processing_started_notification(flight_name)
+        
+        # Try to read metadata to get the uploader's email
+        # Metadata file is located in UPLOADS_HISTORY_PATH alongside the archived file
+        import json
+        import glob
+        recipient_email = None
+        # Try both .7z and .zip extensions with glob pattern to match timestamp in filename
+        for ext in ['.7z', '.zip']:
+            # Use glob pattern to find metadata file (flight_name may not include timestamp)
+            pattern = os.path.join(settings.UPLOADS_HISTORY_PATH, f"{flight_name}*{ext}.meta.json")
+            matching_files = glob.glob(pattern)
+            if matching_files:
+                metadata_path = matching_files[0]  # Use first match
+                try:
+                    with open(metadata_path, 'r') as f:
+                        metadata = json.load(f)
+                        recipient_email = metadata.get('uploaded_by')
+                        logger.info(f"Found uploader email from metadata: {recipient_email}")
+                        break
+                except Exception as meta_error:
+                    logger.warning(f"Could not read metadata file: {meta_error}")
+        
+        if not recipient_email:
+            logger.info("No metadata found, will send to all configured recipients")
+        
+        # Send email to uploader if found, otherwise send to all configured recipients
+        emails.send_processing_started_notification(flight_name, recipient_email=recipient_email)
     except Exception as e:
         logger.error(f"Failed to send 'started' notification email: {e}", exc_info=True)
 
@@ -612,6 +742,8 @@ def run_thermal_processing(flight_path_arg):
 
         # --- Log: Mosaic Creation ---
         logger.info(">>> Step 1/8: Creating Mosaic Image (gdal.Warp)...")
+        # Phase 4: Update progress
+        update_job_progress('Creating mosaic image', 30)
         # Pass output path explicitly
         merge(files, mosaic_image)
         msg += "\nMosaic produced OK"
@@ -622,19 +754,28 @@ def run_thermal_processing(flight_path_arg):
 
         # --- Log: File Copy/Upload ---
         logger.info(">>> Step 2/8: Copying Mosaic to GeoServer Storage...")
-        copy_to_geoserver_storage(mosaic_image, flight_name + ".tif")
-        msg += "\nMosaic pushed to GeoServer storage OK"
-        logger.info("Mosaic pushed to GeoServer storage OK")
-        mosaic_stored_ok = True
+        # Phase 4: Update progress
+        update_job_progress('Copying mosaic to GeoServer storage', 45)
+        try:
+            copy_to_geoserver_storage(mosaic_image, flight_name + ".tif")
+            msg += "\nMosaic pushed to GeoServer storage OK"
+            logger.info("Mosaic pushed to GeoServer storage OK")
+            mosaic_stored_ok = True
+        except Exception as e:
+            error_msg = f"Failed to copy mosaic to GeoServer storage: {e}"
+            logger.error(error_msg, exc_info=True)
+            raise  # Critical error - mosaic must be stored
 
         # --- Log: Footprint Creation ---
         logger.info(">>> Step 3/8: Creating Footprint and pushing to PostGIS...")
+        # Phase 4: Update progress
+        update_job_progress('Creating footprint', 50)
         create_mosaic_footprint_as_line(files, raw_img_folder, flight_timestamp, mosaic_image, engine, footprint, output_geopackage)
         msg += "\nFootprint produced and pushed to PostGIS OK"
         logger.info('Footprint produced and pushed to PostGIS OK') 
 
         # TEST MODE: Intentional failure for email testing
-        if decouple.config("TEST_THERMAL_PROCESSING_FAILURE", default="false") == 'true':
+        if decouple.config("TEST_THERMAL_PROCESSING_FAILURE", default=False, cast=bool):
             raise Exception("TEST MODE: Intentional failure for email testing")
 
         # --- Log: District Check ---
@@ -651,6 +792,8 @@ def run_thermal_processing(flight_path_arg):
 
         # --- Log: Hotspot Analysis ---
         logger.info(">>> Step 6/8: Analyzing Hotspots (Intersects)...")
+        # Phase 4: Update progress
+        update_job_progress('Analyzing hotspots and creating boundaries', 60)
         all_images_with_hotspots = create_boundaries_and_centroids(flight_timestamp, kml_boundaries_file, bboxes, engine, output_geopackage)
         if not all_images_with_hotspots:
             msg += "\nNO HOTSPOTS FOUND!!!"
@@ -662,18 +805,29 @@ def run_thermal_processing(flight_path_arg):
         # --- Log: Image Conversion ---
         count = len(all_images_with_hotspots)
         logger.info(f">>> Step 7/8: Converting {count} Hotspot Images (PNG to TIF)...")
+        # Phase 4: Update progress
+        update_job_progress('Converting hotspot images to TIF', 70)
+        converted_count = 0
+        failed_count = 0
         if len(all_images_with_hotspots) > 0:
             for img in all_images_with_hotspots:
                 full_path = os.path.join(raw_img_folder, img)
-                translate_png2tif(full_path, img, flight_name)
-            msg += "\nProduction of tif images OK"
-            logger.info("Production of tif images OK")
+                try:
+                    translate_png2tif(full_path, img, flight_name)
+                    converted_count += 1
+                except Exception as e:
+                    logger.error(f"Skipping image {img} due to conversion error: {e}")
+                    failed_count += 1
+            msg += f"\nProduction of tif images: {converted_count} succeeded, {failed_count} failed"
+            logger.info(f"Production of tif images: {converted_count} succeeded, {failed_count} failed")
 
         # Wait for storage sync
         time.sleep(60)
 
         # --- Log: GeoServer Publishing ---
         logger.info(">>> Step 8/8: Publishing to GeoServer...")
+        # Phase 4: Update progress
+        update_job_progress('Publishing to GeoServer', 80)
         if mosaic_stored_ok:
             publish_image_on_geoserver(flight_name)
             msg += "\nMosaic published on geoserver OK"
@@ -691,6 +845,9 @@ def run_thermal_processing(flight_path_arg):
         if all_images_with_hotspots:
             msg += f"\nPublished {len(all_images_with_hotspots)} individual hotspot images to geoserver OK."
             logger.info(f"Published {len(all_images_with_hotspots)} individual hotspot images to geoserver OK.")
+        
+        # Phase 4: Update progress to near completion
+        update_job_progress('Finalizing processing', 95)
 
     except Exception as e:
         # If ANY of the steps in the 'try' block fails, the code will jump directly here.
@@ -700,22 +857,79 @@ def run_thermal_processing(flight_path_arg):
         logger.error(error_details, exc_info=True)
     finally:
         logger.info(">>> Preparing to send final completion notification email...")
+        
+        # Try to get recipient from metadata
+        # Metadata file is in UPLOADS_HISTORY_PATH
+        import json
+        import glob
+        recipient_email = None
+        for ext in ['.7z', '.zip']:
+            # Use glob pattern to find metadata file (flight_name may not include timestamp)
+            pattern = os.path.join(settings.UPLOADS_HISTORY_PATH, f"{flight_name}*{ext}.meta.json")
+            matching_files = glob.glob(pattern)
+            if matching_files:
+                metadata_path = matching_files[0]  # Use first match
+                try:
+                    with open(metadata_path, 'r') as f:
+                        metadata = json.load(f)
+                        recipient_email = metadata.get('uploaded_by')
+                        logger.info(f"Found uploader email from metadata for final notification: {recipient_email}")
+                        break
+                except Exception as meta_error:
+                    logger.warning(f"Could not read metadata file for final notification: {meta_error}")
+        
         try:
             # Check the "scoreboard" variable to decide which email to send.
             if success:
                 # If the 'success' flag is still True, send the success email.
                 emails.send_success_notification(
                     flight_name=flight_name, 
-                    details_message=msg
+                    details_message=msg,
+                    recipient_email=recipient_email
                 )
             else:
                 # If the 'success' flag was set to False in the 'except' block, send the failure email.
                 emails.send_failure_notification(
-                    flight_name=flight_name, 
-                    error_message=error_details
+                    flight_name=flight_name,
+                    error_message=error_details,
+                    recipient_email=recipient_email
                 )
         except Exception as e:
             logger.error(f"FATAL: Could not send the final notification email. Error: {e}", exc_info=True)
+
+        # Phase 3: Update job with final processing results
+        if job:
+            try:
+                from django.utils import timezone
+                job.log_file_path = log_file_path if 'log_file_path' in locals() else ''
+                job.output_geopackage_path = output_geopackage if 'output_geopackage' in locals() else ''
+                
+                # Phase 4: Save processing statistics
+                if 'files' in locals():
+                    job.total_images_processed = len(files)
+                if 'all_images_with_hotspots' in locals():
+                    job.hotspots_detected = len(all_images_with_hotspots)
+                if 'footprint' in locals() and hasattr(footprint, 'districts'):
+                    job.districts_covered = footprint.districts
+                
+                # Update status and progress based on success
+                if success:
+                    if job.status != 'COMPLETED':
+                        job.status = 'COMPLETED'
+                        job.processing_completed_at = timezone.now()
+                    job.progress_percentage = 100
+                    job.current_step = 'Processing completed successfully'
+                else:
+                    if job.status != 'FAILED':
+                        job.status = 'FAILED'
+                        job.processing_completed_at = timezone.now()
+                    job.error_message = error_details
+                    job.current_step = 'Processing failed'
+                
+                job.save()
+                logger.info(f"Job {job.id} final results saved: status={job.status}, images={job.total_images_processed}, hotspots={job.hotspots_detected}")
+            except Exception as e:
+                logger.error(f"Error saving final job results: {e}", exc_info=True)
 
         # This ensures it's always the last thing logged for the process.
         end_msg = f"=== FINISHED PROCESSING FOR: {flight_name} (Success: {success}) ==="
@@ -725,6 +939,10 @@ def run_thermal_processing(flight_path_arg):
         if 'file_handler' in locals() and file_handler in logger.handlers:
             logger.removeHandler(file_handler)
             file_handler.close()
+    
+    # Re-raise exception if processing failed so caller (imports_processor) knows about it
+    if not success:
+        raise Exception(error_details if 'error_details' in locals() else "Processing failed")
 
 # =========================================================
 # Legacy Support: Allows running from command line (like .sh)

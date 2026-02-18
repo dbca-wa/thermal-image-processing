@@ -7,17 +7,21 @@
     <input type="hidden" id="route_path" name="route_path" value="{{ route_path }}"/>
     <div class="tip_uploads_history my-1">
 
-        <div class="card  rounded-3 shadow-sm">
+        <div class="card rounded-3 shadow-sm">
             <div class="card-header py-3">
-                <h4 class="my-0 fw-bold">Archives</h4>
+                <h4 class="my-0 fw-bold"><i class="bi bi-archive"></i> Archives</h4>
             </div>
             <div class="card-body">
+                <p class="text-muted mb-3">
+                    <i class="bi bi-info-circle"></i> 
+                    Original uploaded source files (.7z, .zip). These are archived copies of files uploaded before processing. For processed results, see the Processed Data page.
+                </p>
                 <nav aria-label="breadcrumb">
                     <ol id="breadcrumb" class="breadcrumb">
                     </ol>
                   </nav>
                   <div class="alert alert-info alert-dismissible fade show" role="alert" id="progress-container" style="display: none;" >
-                      <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                      <button type="button" class="btn-close" id="progress-cancel-btn" aria-label="Close"></button>
                     <div class="row">
                         <div class="col-md-4">
                             <h6>Download in progress

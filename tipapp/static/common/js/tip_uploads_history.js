@@ -14,6 +14,9 @@ var tip_uploads_history = {
     root: "",
     location: "",
     isDownloading: false,
+    currentXhr: null,
+    sort_by: "name",
+    sort_order: "asc",
   },
 
   init: function () {
@@ -36,6 +39,14 @@ var tip_uploads_history = {
     _.renderBreadcrumb();
     _.renderDataTable();
     utils.register_prevent_from_leaving(_.var);
+
+    $("#progress-cancel-btn").on("click", function () {
+      if (_.var.currentXhr) {
+        _.var.currentXhr.abort();
+      } else {
+        _.downloadCancelled();
+      }
+    });
   },
   renderDataTable: function () {
     const _ = tip_uploads_history;
@@ -57,12 +68,23 @@ var tip_uploads_history = {
           _.var.search = data?.search?.value;
         }
 
+        // Get sort information from DataTables
+        if (data?.order && data.order.length > 0) {
+          const columnIndex = data.order[0].column;
+          const direction = data.order[0].dir;
+          const columnNames = ["name", "created_at", "size"];
+          _.var.sort_by = columnNames[columnIndex] || "name";
+          _.var.sort_order = direction;
+        }
+
         _.get_folder_data(
           {
             page: _.var.page,
             page_size: _.var.page_size,
             route_path: _.var.route_path,
             search: _.var.search,
+            sort_by: _.var.sort_by,
+            sort_order: _.var.sort_order,
             draw: data?.draw,
           },
           function (response) {
@@ -241,6 +263,8 @@ var tip_uploads_history = {
       page_size: params?.page_size ?? _.var.page_size,
       route_path: params?.route_path ?? "",
       search: params?.search ?? "",
+      sort_by: params?.sort_by ?? _.var.sort_by,
+      sort_order: params?.sort_order ?? _.var.sort_order,
     };
     const queryParams = utils.make_query_params(_params);
     history.replaceState(null, null, "?" + queryParams.toString());
@@ -277,6 +301,7 @@ var tip_uploads_history = {
       xhr: function () {
         var xhr = new window.XMLHttpRequest();
         const _ = tip_uploads_history;
+        _.var.currentXhr = xhr;
         _.var.isDownloading = true;
         $(".button-download").attr("disabled", true);
         _.progressContainer.show();
@@ -304,16 +329,30 @@ var tip_uploads_history = {
           }
         });
         xhr.addEventListener("error", _.downloadError);
-        xhr.addEventListener("abort", _.downloadError);
+        xhr.addEventListener("abort", _.downloadCancelled);
         return xhr;
       },
     });
+  },
+
+  downloadCancelled: function (e) {
+    const _ = tip_uploads_history;
+    _.var.isDownloading = false;
+    _.var.currentXhr = null;
+    _.progressContainer.hide();
+    _.progressContainer.find("#filename").empty();
+    _.progressBar.attr("aria-valuenow", 5);
+    _.progressBar.find(".progress-bar").width("5%");
+    _.progressBar.find(".progress-bar").text("5%");
+    $(".button-download").attr("disabled", false);
   },
 
   downloadError: function (e) {
     const _ = tip_uploads_history;
     const { markup } = utils;
     _.var.isDownloading = false;
+    _.progressContainer.hide();
+    $(".button-download").attr("disabled", false);
 
     const errorAlert = markup(
       "div",
@@ -333,6 +372,7 @@ var tip_uploads_history = {
   downloadFinished: function (e) {
     const _ = tip_uploads_history;
     _.var.isDownloading = false;
+    _.var.currentXhr = null;
 
     setTimeout(function () {
       try {

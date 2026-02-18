@@ -42,6 +42,48 @@ class ImportsProcessor():
                 print(f"\nProcessing file: {filename}")
                 logger.info ("File to be processed: " + str(entry.path))   
 
+                # Phase 3: Find and update job record
+                from tipapp.models import ThermalProcessingJob
+                from django.utils import timezone
+                import re
+                
+                job = None
+                
+                # Try to find job by file_path first (handles duplicate uploads with suffixed flight_names)
+                try:
+                    job = ThermalProcessingJob.objects.get(file_path=entry.path)
+                    logger.info(f"Job found by file_path: {job.id} (flight_name={job.flight_name})")
+                except ThermalProcessingJob.DoesNotExist:
+                    # Fallback: try to find by flight_name extracted from filename
+                    flight_name = filename
+                    # Remove .7z or .zip extension
+                    if flight_name.lower().endswith('.7z'):
+                        flight_name = flight_name[:-3]
+                    elif flight_name.lower().endswith('.zip'):
+                        flight_name = flight_name[:-4]
+                    # Remove timestamp if present (format: .YYYYMMDD_HHMMSS)
+                    flight_name = re.sub(r'\.\d{8}_\d{6}$', '', flight_name)
+                    
+                    try:
+                        job = ThermalProcessingJob.objects.get(flight_name=flight_name)
+                        logger.info(f"Job found by flight_name: {job.id}")
+                    except ThermalProcessingJob.DoesNotExist:
+                        logger.warning(f"Job record not found for file {filename} (tried file_path and flight_name={flight_name}), processing will continue without tracking")
+                except Exception as e:
+                    logger.error(f"Error searching for job record: {e}", exc_info=True)
+                
+                # Update job status to PROCESSING if found
+                if job:
+                    try:
+                        job.status = 'PROCESSING'
+                        job.processing_started_at = timezone.now()
+                        job.current_step = 'Starting file preparation'
+                        job.progress_percentage = 5
+                        job.save()
+                        logger.info(f"Job {job.id} status updated to PROCESSING")
+                    except Exception as e:
+                        logger.error(f"Error updating job status: {e}", exc_info=True)
+
                 try:
                     # =========================================================
                     # Call Python functions directly instead of .sh
@@ -49,10 +91,20 @@ class ImportsProcessor():
                     print(f"  -> Starting file preparation (unzip and move)...")
                     logger.info(f"Starting direct Python processing for: {filename}")
                     
+                    # Phase 4: Update progress before unzipping
+                    if job:
+                        try:
+                            job.current_step = 'Unzipping file'
+                            job.progress_percentage = 10
+                            job.save(update_fields=['current_step', 'progress_percentage'])
+                        except Exception as e:
+                            logger.error(f"Error updating unzip progress: {e}")
+                    
                     # 1. Unzip and Prepare (Replaces shell script logic)
                     # entry.path: The full path to the pending .7z file
                     # dest_path: Where to move the original .7z file after extraction
-                    processed_dir_path = unzip_and_prepare(entry.path)
+                    # Pass flight_name to handle duplicate uploads with suffix
+                    processed_dir_path = unzip_and_prepare(entry.path, target_dirname=job.flight_name if job else None)
                     
                     print(f"  -> File successfully unzipped to: {processed_dir_path}")
                     logger.info(f"Unzipped and prepared at: {processed_dir_path}")
@@ -60,17 +112,46 @@ class ImportsProcessor():
                     # 2. Run Main Thermal Processing
                     # This runs the GDAL/PostGIS/GeoServer pipeline
                     print(f"  -> Starting main thermal processing pipeline...")
-                    run_thermal_processing(processed_dir_path)
+                    run_thermal_processing(processed_dir_path, job_id=job.id if job else None)
                     
                     print(f"  -> Thermal processing pipeline completed successfully.")
                     logger.info(f"Successfully finished processing for: {filename}")
                     
-                    print(f"  => SUCCESS: Finished processing {filename}")
+                    # Phase 3: Job status has already been updated by run_thermal_processing
+                    # No need to update here as it may have been set to FAILED if there were errors
+                    if job:
+                        try:
+                            job.refresh_from_db()
+                            logger.info(f"Job {job.id} final status: {job.status}")
+                        except Exception as e:
+                            logger.error(f"Error refreshing job status: {e}", exc_info=True)
+                    
+                    print(f"  => FINISHED: Processing {filename} with status: {job.status if job else 'N/A'}")
 
                 # Since we are running python code directly, we catch standard Exceptions
                 except Exception as e:
                     print(f"  => ERROR: An error occurred while processing {filename}: {e}")
                     logger.error(f"Error processing file {filename}: {e}", exc_info=True)
+                    
+                    # Phase 3: Check if job status was already set by run_thermal_processing
+                    if job:
+                        try:
+                            # Refresh from DB to get latest values
+                            job.refresh_from_db()
+                            
+                            # Only update if not already set to FAILED by run_thermal_processing
+                            if job.status != 'FAILED':
+                                job.status = 'FAILED'
+                                job.processing_completed_at = timezone.now()
+                                job.error_message = str(e)
+                                job.current_step = 'Processing failed'
+                                # Save only the fields we're updating
+                                job.save(update_fields=['status', 'processing_completed_at', 'error_message', 'current_step'])
+                                logger.info(f"Job {job.id} status updated to FAILED")
+                            else:
+                                logger.info(f"Job {job.id} already marked as FAILED by run_thermal_processing")
+                        except Exception as update_error:
+                            logger.error(f"Error updating job failure status: {update_error}", exc_info=True)
 
             print("-" * 50)
             print("All pending files have been processed.")

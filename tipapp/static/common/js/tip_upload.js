@@ -96,6 +96,8 @@ let tip_upload = {
     const files = $(e.target).prop("files");
     if (!files || files.length === 0) return;
     tip_upload.uploadFiles(files);
+    // Reset the file input so the same file can be selected again
+    e.target.value = '';
   },
 
   get_pending_imports_data: function (params, cb_success, cb_error) {

@@ -31,6 +31,9 @@ PROJECT_TITLE = "Thermal Imaging Processing"
 PROJECT_DESCRIPTION = "System is use to process flight imaging data"
 PROJECT_VERSION = "v1"
 
+# Dashboard settings
+DASHBOARD_AUTO_REFRESH_INTERVAL = decouple.config("DASHBOARD_AUTO_REFRESH_INTERVAL", default=3, cast=int)  # seconds
+
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/3.2/howto/deployment/checklist/
 # SECURITY WARNING: keep the secret key used in production secret!
@@ -281,7 +284,7 @@ if platform.machine() == "arm64":
     GEOS_LIBRARY_PATH = "/opt/homebrew/opt/geos/lib/libgeos_c.dylib"
 
 # Django Timezone
-TIME_ZONE = 'Australia/Perth'
+TIME_ZONE = decouple.config("TIME_ZONE", default='Australia/Perth')
 # DATE_FORMAT = 'dd/mm/YYYY'
 # DATETIME_FORMAT = 'dd/mm/YYYY HH:ii:ss'
 # SHORT_DATE_FORMAT = 'dd/mm/YY'

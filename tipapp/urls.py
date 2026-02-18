@@ -22,6 +22,7 @@ from django import conf
 from django import urls
 from django.contrib import admin
 from django.contrib.auth import views as auth_views
+from django.views.generic import RedirectView
 
 
 # Local
@@ -41,11 +42,17 @@ def trigger_error(request):
 
 # Django URL Patterns
 urlpatterns = [
-    # Home Page
-    urls.path("", views.ThermalFilesDashboardView.as_view(), name="home"),
+    # Home Page - Upload & Monitor is the main workflow entry point
+    urls.path("", views.UploadMonitorView.as_view(), name="home"),
+    
+    # Main Pages
+    urls.path("upload-monitor", views.UploadMonitorView.as_view(), name="upload-monitor"),
     urls.path("files-dashboard", views.ThermalFilesDashboardView.as_view(), name="files-dashboard"),
-    urls.path("upload-files", views.ThermalFilesUploadView.as_view(), name="upload-files"),
     urls.path("uploads-history", views.UploadsHistoryView.as_view(), name="uploads-history"),
+    
+    # Redirects for old URLs (backwards compatibility)
+    urls.path("upload-files", RedirectView.as_view(pattern_name="upload-monitor", permanent=True), name="upload-files-redirect"),
+    urls.path("processing-jobs-dashboard", RedirectView.as_view(pattern_name="upload-monitor", permanent=True), name="processing-jobs-dashboard-redirect"),
     
     urls.path("api/upload-files/thermal_files/", views.api_upload_thermal_files),
     urls.path("api/upload-files/list_pending_imports/", views.list_pending_imports),
@@ -53,6 +60,10 @@ urlpatterns = [
     urls.path("api/thermal-files/list_thermal_folder_contents/", views.list_thermal_folder_contents),
     urls.path("api/thermal-files/list_uploaded_files/", views.list_uploads_history_contents),
     urls.path("api/thermal-files/download/", views.api_download_thermal_file_or_folder),
+    
+    # Phase 5: Job Monitoring API Endpoints
+    urls.path("api/processing-jobs/", views.list_processing_jobs, name="list_processing_jobs"),
+    urls.path("api/processing-jobs/<int:job_id>/", views.get_job_status, name="get_job_status"),
     # Django Administration
     urls.path("admin/", admin.site.urls),
 

@@ -4,6 +4,7 @@ import logging
 from datetime import datetime, timezone
 from pathlib import Path
 import py7zr
+from zoneinfo import ZoneInfo
 
 from tipapp import settings
 
@@ -12,7 +13,9 @@ logger = logging.getLogger(__name__)
 
 def convert_date(timestamp):
     d = datetime.fromtimestamp(timestamp, timezone.utc)
-    formatted_date = d.strftime('%d %b %Y %H:%M:%S')
+    local_tz = ZoneInfo(settings.TIME_ZONE)
+    d_local = d.astimezone(local_tz)
+    formatted_date = d_local.strftime('%d %b %Y %H:%M:%S')
     return formatted_date
 
 def get_files_list(dir_path, extensions = []):
@@ -37,32 +40,71 @@ def get_dir_size(dir_path):
         logger.error(e)
         return 0
 
-def get_thermal_files(dir_path, page, offset, search = ""):
-    items = []
-    index = 0
+def get_thermal_files(dir_path, page, offset, search = "", sort_by = "name", sort_order = "asc"):
+    all_items = []
     try:
-        dir_entries = sorted(os.scandir(dir_path), key=lambda x: (x.is_file(), x.name))
-        
-        for entry in dir_entries:
+        # Collect all entries with lightweight metadata (no directory size calculation yet)
+        for entry in os.scandir(dir_path):
             entry_name = entry.name
+            
+            # Skip metadata files (hidden files used for tracking upload information)
+            if entry_name.endswith('.meta.json'):
+                continue
+            
             if search != "" and not re.search(str.lower(search), str.lower(entry_name)):
                 continue
-            if index >=page * offset and index < (page + 1) * offset:
-                info = entry.stat()
-                is_dir = not entry.is_file()
-                item = {"name": entry_name, "path" : entry.path , "created_at": convert_date(info.st_mtime), "is_dir": is_dir }
-                if is_dir:
-                    item['size'] = get_dir_size(entry.path)
-                else:
-                    item['size'] = info.st_size
-                items.append(item)
-            else:
-                items.append({'name': entry_name})
-            index += 1
+            
+            info = entry.stat()
+            is_dir = not entry.is_file()
+            item = {
+                "name": entry_name, 
+                "path": entry.path, 
+                "created_at": convert_date(info.st_mtime),
+                "created_at_timestamp": info.st_mtime,
+                "is_dir": is_dir,
+                "size": info.st_size if not is_dir else 0  # Use 0 for dirs temporarily
+            }
+            all_items.append(item)
+        
+        # Sort the items
+        reverse = (sort_order.lower() == "desc")
+        if sort_by == "name":
+            # Sort folders first, then by name
+            all_items.sort(key=lambda x: (x['is_dir'] == False, x['name'].lower()), reverse=reverse)
+        elif sort_by == "created_at":
+            # Sort folders first, then by creation date
+            all_items.sort(key=lambda x: (x['is_dir'] == False, x['created_at_timestamp']), reverse=reverse)
+        elif sort_by == "size":
+            # For size sort, we need to calculate directory sizes first
+            # Only calculate for directories to avoid unnecessary work
+            for item in all_items:
+                if item['is_dir']:
+                    item['size'] = get_dir_size(item['path'])
+            # Sort folders first, then by size
+            all_items.sort(key=lambda x: (x['is_dir'] == False, x['size']), reverse=reverse)
+        
+        # Paginate the results BEFORE calculating remaining directory sizes
+        total_count = len(all_items)
+        start_index = page * offset
+        end_index = (page + 1) * offset
+        paginated_items = all_items[start_index:end_index]
+        
+        # Calculate directory sizes ONLY for items on the current page (if not already done)
+        if sort_by != "size":
+            for item in paginated_items:
+                if item['is_dir']:
+                    item['size'] = get_dir_size(item['path'])
+        
+        # Remove the temporary timestamp field
+        for item in paginated_items:
+            item.pop('created_at_timestamp', None)
+        
     except Exception as e:
         logger.error(f"Error getting thermal files from directory: {dir_path}")
+        logger.error(e)
+        return [], 0
             
-    return items
+    return paginated_items, total_count
 
 def get_file_record(dir_path, file_name):
     file_path = os.path.join(dir_path, file_name)
