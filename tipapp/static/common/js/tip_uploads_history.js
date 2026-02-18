@@ -14,6 +14,7 @@ var tip_uploads_history = {
     root: "",
     location: "",
     isDownloading: false,
+    currentXhr: null,
   },
 
   init: function () {
@@ -36,6 +37,14 @@ var tip_uploads_history = {
     _.renderBreadcrumb();
     _.renderDataTable();
     utils.register_prevent_from_leaving(_.var);
+
+    $("#progress-cancel-btn").on("click", function () {
+      if (_.var.currentXhr) {
+        _.var.currentXhr.abort();
+      } else {
+        _.downloadCancelled();
+      }
+    });
   },
   renderDataTable: function () {
     const _ = tip_uploads_history;
@@ -277,6 +286,7 @@ var tip_uploads_history = {
       xhr: function () {
         var xhr = new window.XMLHttpRequest();
         const _ = tip_uploads_history;
+        _.var.currentXhr = xhr;
         _.var.isDownloading = true;
         $(".button-download").attr("disabled", true);
         _.progressContainer.show();
@@ -304,16 +314,30 @@ var tip_uploads_history = {
           }
         });
         xhr.addEventListener("error", _.downloadError);
-        xhr.addEventListener("abort", _.downloadError);
+        xhr.addEventListener("abort", _.downloadCancelled);
         return xhr;
       },
     });
+  },
+
+  downloadCancelled: function (e) {
+    const _ = tip_uploads_history;
+    _.var.isDownloading = false;
+    _.var.currentXhr = null;
+    _.progressContainer.hide();
+    _.progressContainer.find("#filename").empty();
+    _.progressBar.attr("aria-valuenow", 5);
+    _.progressBar.find(".progress-bar").width("5%");
+    _.progressBar.find(".progress-bar").text("5%");
+    $(".button-download").attr("disabled", false);
   },
 
   downloadError: function (e) {
     const _ = tip_uploads_history;
     const { markup } = utils;
     _.var.isDownloading = false;
+    _.progressContainer.hide();
+    $(".button-download").attr("disabled", false);
 
     const errorAlert = markup(
       "div",
@@ -333,6 +357,7 @@ var tip_uploads_history = {
   downloadFinished: function (e) {
     const _ = tip_uploads_history;
     _.var.isDownloading = false;
+    _.var.currentXhr = null;
 
     setTimeout(function () {
       try {
