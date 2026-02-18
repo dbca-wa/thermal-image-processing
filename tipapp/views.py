@@ -147,16 +147,15 @@ def list_thermal_folder_contents(request, *args, **kwargs):
     # --- Retrieve and paginate the file list ---
     try:
         # Pass the safe, absolute path to the function that gets the files.
-        file_list = get_thermal_files(final_abs_path, int(page_param) - 1, int(page_size_param), search_term, sort_by, sort_order)
-        
-        paginator = Paginator(file_list, page_size_param)
-        page = paginator.page(page_param)
+        page_num = int(page_param)
+        page_size = int(page_size_param)
+        file_list, total_count = get_thermal_files(final_abs_path, page_num - 1, page_size, search_term, sort_by, sort_order)
         
         return JsonResponse({
-            "count": paginator.count,
-            "hasPrevious": page.has_previous(),
-            "hasNext": page.has_next(),
-            'results': page.object_list,
+            "count": total_count,
+            "hasPrevious": page_num > 1,
+            "hasNext": page_num * page_size < total_count,
+            'results': file_list,
         })
     except Exception as e:
         logger.error(f"Error retrieving file list for '{final_abs_path}': {e}", exc_info=True)
@@ -171,20 +170,22 @@ def list_uploads_history_contents(request, *args, **kwargs):
     page_size_param = request.GET.get('page_size', '10')
     route_path = request.GET.get('route_path', '')
     search = request.GET.get('search', '')
+    sort_by = request.GET.get('sort_by', 'name')
+    sort_order = request.GET.get('sort_order', 'asc')
 
     dir_path = route_path if route_path.startswith(dir_path) else os.path.join(dir_path, route_path)
 
     if not os.path.exists(dir_path):
         return JsonResponse({'error': f'Path [{dir_path}] does not exist.'}, status=400)
 
-    file_list = get_thermal_files(dir_path, int(page_param) - 1, int(page_size_param), search)
-    paginator = Paginator(file_list, page_size_param)
-    page = paginator.page(page_param)
+    page_num = int(page_param)
+    page_size = int(page_size_param)
+    file_list, total_count = get_thermal_files(dir_path, page_num - 1, page_size, search, sort_by, sort_order)
     return JsonResponse({
-        "count": paginator.count,
-        "hasPrevious": page.has_previous(),
-        "hasNext": page.has_next(),
-        'results': page.object_list,
+        "count": total_count,
+        "hasPrevious": page_num > 1,
+        "hasNext": page_num * page_size < total_count,
+        'results': file_list,
     })
 
 @api_view(["POST"])

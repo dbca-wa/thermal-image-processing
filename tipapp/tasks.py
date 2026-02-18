@@ -84,6 +84,7 @@ def get_thermal_files(dir_path, page, offset, search = "", sort_by = "name", sor
             all_items.sort(key=lambda x: (x['is_dir'] == False, x['size']), reverse=reverse)
         
         # Paginate the results BEFORE calculating remaining directory sizes
+        total_count = len(all_items)
         start_index = page * offset
         end_index = (page + 1) * offset
         paginated_items = all_items[start_index:end_index]
@@ -101,9 +102,9 @@ def get_thermal_files(dir_path, page, offset, search = "", sort_by = "name", sor
     except Exception as e:
         logger.error(f"Error getting thermal files from directory: {dir_path}")
         logger.error(e)
-        return []
+        return [], 0
             
-    return paginated_items
+    return paginated_items, total_count
 
 def get_file_record(dir_path, file_name):
     file_path = os.path.join(dir_path, file_name)
