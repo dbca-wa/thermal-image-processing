@@ -104,6 +104,7 @@
     <script>
         // DataTable instance
         let jobsTable = null;
+        const IS_ADMIN = {{ has_upload_permission|yesno:'true,false' }};
         let autoRefreshInterval = null;
 
         // Helper functions
@@ -198,6 +199,28 @@
                 console.error('Error loading job details:', error);
                 alert('Error loading job details');
             }
+        }
+
+        async function resetStuckJob(jobId, flightName) {
+            if (!confirm(`Reset stuck job "${flightName}" to FAILED?\n\nDo this only if the job is stuck due to a server crash.`)) return;
+            try {
+                const response = await fetch(`/api/processing-jobs/${jobId}/reset/`, { method: 'POST', headers: { 'X-CSRFToken': getCookie('csrftoken') } });
+                const data = await response.json();
+                if (response.ok) {
+                    alert(data.message);
+                    refreshTable();
+                } else {
+                    alert('Error: ' + (data.error || 'Unknown error'));
+                }
+            } catch (error) {
+                alert('Request failed: ' + error);
+            }
+        }
+
+        function getCookie(name) {
+            const value = `; ${document.cookie}`;
+            const parts = value.split(`; ${name}=`);
+            if (parts.length === 2) return parts.pop().split(';').shift();
         }
 
         function refreshTable() {
@@ -350,6 +373,13 @@
                                 <i class="bi bi-eye"></i> Details
                             </button>`;
                             
+                            // Add reset button for stuck PROCESSING jobs (admin only)
+                            if (row.status === 'PROCESSING' && IS_ADMIN) {
+                                buttons += ` <button class="btn btn-sm btn-warning mb-1" onclick="resetStuckJob(${row.id}, '${row.flight_name}')">
+                                    <i class="bi bi-arrow-counterclockwise"></i> Reset
+                                </button>`;
+                            }
+
                             // Add processed data link for completed jobs
                             if (row.status === 'COMPLETED') {
                                 // Link to processed data page showing the flight folder

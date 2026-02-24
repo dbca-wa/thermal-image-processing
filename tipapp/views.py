@@ -602,3 +602,40 @@ def get_job_status(request, job_id, *args, **kwargs):
     }
     
     return JsonResponse(response_data)
+
+
+@api_view(["POST"])
+@permission_classes([IsInAdministratorsGroup])
+def reset_stuck_job(request, job_id, *args, **kwargs):
+    """
+    Manually reset a stuck PROCESSING job to FAILED status.
+
+    Only jobs currently in PROCESSING state can be reset.
+    Intended for admins to fix jobs stuck due to a server crash/restart.
+    """
+    from tipapp.models import ThermalProcessingJob
+    from django.utils import timezone
+
+    try:
+        job = ThermalProcessingJob.objects.get(id=job_id)
+    except ThermalProcessingJob.DoesNotExist:
+        return JsonResponse({'error': 'Job not found'}, status=404)
+
+    if job.status != 'PROCESSING':
+        return JsonResponse(
+            {'error': f"Job is not in PROCESSING state (current status: {job.status})."},
+            status=400,
+        )
+
+    job.status = 'FAILED'
+    job.processing_completed_at = timezone.now()
+    job.error_message = (
+        f"Job manually reset by {request.user.email if hasattr(request.user, 'email') else request.user}. "
+        f"It was stuck in PROCESSING status, likely due to a server crash or restart."
+    )
+    job.current_step = 'Processing interrupted (manually reset)'
+    job.save(update_fields=['status', 'processing_completed_at', 'error_message', 'current_step'])
+
+    logger.info(f"Job {job.id} ({job.flight_name}) manually reset to FAILED by {request.user}.")
+
+    return JsonResponse({'message': f"Job {job.id} has been reset to FAILED.", 'job_id': job.id})

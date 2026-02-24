@@ -64,6 +64,7 @@ urlpatterns = [
     # Phase 5: Job Monitoring API Endpoints
     urls.path("api/processing-jobs/", views.list_processing_jobs, name="list_processing_jobs"),
     urls.path("api/processing-jobs/<int:job_id>/", views.get_job_status, name="get_job_status"),
+    urls.path("api/processing-jobs/<int:job_id>/reset/", views.reset_stuck_job, name="reset_stuck_job"),
     # Django Administration
     urls.path("admin/", admin.site.urls),
 
