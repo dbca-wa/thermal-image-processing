@@ -65,9 +65,12 @@ def send_processing_started_notification(flight_name: str, recipient_email: str 
     """
     Prepares and sends the 'Processing Started' email.
     If recipient_email is provided, sends only to that user. Otherwise, sends to all configured recipients.
+    In non-prod environments the wagov email backend redirects delivery to NON_PROD_EMAIL; the
+    intended_recipient is included in the context so the template can show a non-prod banner.
     """
     context = {
         'flight_name': flight_name,
+        'intended_recipient': recipient_email or 'configured notification list',
     }
     if recipient_email:
         # Send to specific user only
@@ -89,10 +92,13 @@ def send_success_notification(flight_name: str, details_message: str, recipient_
     """
     Prepares and sends the 'Success' email.
     If recipient_email is provided, sends only to that user. Otherwise, sends to all configured recipients.
+    In non-prod environments the wagov email backend redirects delivery to NON_PROD_EMAIL; the
+    intended_recipient is included in the context so the template can show a non-prod banner.
     """
     context = {
         'flight_name': flight_name,
         'details_message': details_message,
+        'intended_recipient': recipient_email or 'configured notification list',
     }
     if recipient_email:
         # Send to specific user only
@@ -114,10 +120,13 @@ def send_failure_notification(flight_name: str, error_message: str, recipient_em
     """
     Prepares and sends the 'Failure' email.
     If recipient_email is provided, sends only to that user. Otherwise, sends to all configured recipients.
+    In non-prod environments the wagov email backend redirects delivery to NON_PROD_EMAIL; the
+    intended_recipient is included in the context so the template can show a non-prod banner.
     """
     context = {
         'flight_name': flight_name,
         'error_message': error_message,
+        'intended_recipient': recipient_email or 'configured notification list',
     }
     if recipient_email:
         # Send to specific user only

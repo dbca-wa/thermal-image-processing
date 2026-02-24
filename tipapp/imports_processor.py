@@ -2,10 +2,15 @@
 import os
 import logging
 import subprocess
+import shutil
 from datetime import datetime
 # Local
-from tipapp import settings
-from thermalimageprocessing.thermal_image_processing import unzip_and_prepare, run_thermal_processing
+from tipapp import settings, emails
+from thermalimageprocessing.thermal_image_processing import (
+    unzip_and_prepare,
+    run_thermal_processing,
+    ArchiveValidationError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +79,16 @@ class ImportsProcessor():
                 
                 # Update job status to PROCESSING if found
                 if job:
+                    # Skip files whose job is already FAILED — prevents infinite retry loops
+                    # (e.g. when a previous validation error left the file in pending_imports).
+                    if job.status == 'FAILED':
+                        logger.info(
+                            f"Skipping {filename}: job {job.id} is already in FAILED status. "
+                            "Remove the file from pending_imports to clear it."
+                        )
+                        print(f"  -> Skipping {filename}: job already FAILED.")
+                        continue
+
                     try:
                         job.status = 'PROCESSING'
                         job.processing_started_at = timezone.now()
@@ -132,6 +147,34 @@ class ImportsProcessor():
                 except Exception as e:
                     print(f"  => ERROR: An error occurred while processing {filename}: {e}")
                     logger.error(f"Error processing file {filename}: {e}", exc_info=True)
+
+                    # --- Validation errors happen BEFORE run_thermal_processing is called, ---
+                    # --- so that function never sends its failure email. We send it here.   ---
+                    if isinstance(e, ArchiveValidationError):
+                        # Move the invalid file to archives so the cron doesn't retry it
+                        # endlessly on subsequent runs.
+                        try:
+                            if not os.path.exists(settings.UPLOADS_HISTORY_PATH):
+                                os.makedirs(settings.UPLOADS_HISTORY_PATH, exist_ok=True)
+                            dest = os.path.join(settings.UPLOADS_HISTORY_PATH, filename)
+                            shutil.move(entry.path, dest)
+                            logger.info(f"Invalid archive moved to archives: {dest}")
+                        except Exception as move_err:
+                            logger.error(f"Could not move invalid archive to archives: {move_err}")
+
+                        # Send failure notification with the validation error detail
+                        try:
+                            recipient = job.uploaded_by_email if job and job.uploaded_by_email else None
+                            flight_label = job.flight_name if job else os.path.splitext(filename)[0]
+                            emails.send_failure_notification(
+                                flight_name=flight_label,
+                                error_message=str(e),
+                                recipient_email=recipient,
+                            )
+                        except Exception as email_err:
+                            logger.error(
+                                f"Could not send validation-failure notification: {email_err}"
+                            )
                     
                     # Phase 3: Check if job status was already set by run_thermal_processing
                     if job:

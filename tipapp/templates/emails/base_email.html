@@ -16,7 +16,17 @@
             </tr>
             <tr>
                 <td style="height: 600px; padding:11px;" valign="top">
-                    
+                    {% if not settings.PRODUCTION_EMAIL %}
+                    <table width="100%" style="margin-bottom: 16px; background-color: #fff3cd; border: 1px solid #ffc107; border-radius: 4px;">
+                        <tr>
+                            <td style="padding: 10px 14px; color: #856404; font-family: Arial, sans-serif; font-size: 13px;">
+                                <strong>&#9888; Non-production environment ({{ settings.EMAIL_INSTANCE }})</strong><br>
+                                This email was intercepted and redirected by the system.<br>
+                                <strong>Intended recipient:</strong> {{ intended_recipient }}
+                            </td>
+                        </tr>
+                    </table>
+                    {% endif %}
                     {% block email_content %}
                     {% endblock %}
 

@@ -104,6 +104,7 @@
     <script>
         // DataTable instance
         let jobsTable = null;
+        const IS_ADMIN = {{ has_upload_permission|yesno:'true,false' }};
         let autoRefreshInterval = null;
 
         // Helper functions
@@ -200,52 +201,82 @@
             }
         }
 
-        async function loadJobsData() {
+        async function resetStuckJob(jobId, flightName) {
+            if (!confirm(`Reset stuck job "${flightName}" to FAILED?\n\nDo this only if the job is stuck due to a server crash.`)) return;
             try {
-                const response = await fetch('/api/processing-jobs/?page_size=1000');
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
+                const response = await fetch(`/api/processing-jobs/${jobId}/reset/`, { method: 'POST', headers: { 'X-CSRFToken': getCookie('csrftoken') } });
                 const data = await response.json();
-                return data.results;
+                if (response.ok) {
+                    alert(data.message);
+                    refreshTable();
+                } else {
+                    alert('Error: ' + (data.error || 'Unknown error'));
+                }
             } catch (error) {
-                console.error('Error loading jobs:', error);
-                return [];
+                alert('Request failed: ' + error);
             }
+        }
+
+        function getCookie(name) {
+            const value = `; ${document.cookie}`;
+            const parts = value.split(`; ${name}=`);
+            if (parts.length === 2) return parts.pop().split(';').shift();
         }
 
         function refreshTable() {
             if (jobsTable) {
-                console.log('[Auto-refresh] Fetching jobs data...');
-                
-                // Save current scroll position
-                const scrollPosition = window.pageYOffset || document.documentElement.scrollTop;
-                
-                loadJobsData().then(jobs => {
-                    console.log(`[Auto-refresh] Loaded ${jobs.length} jobs`);
-                    jobsTable.clear();
-                    jobsTable.rows.add(jobs);
-                    jobsTable.draw(false); // false = don't reset pagination
-                    
-                    // Restore scroll position
-                    window.scrollTo(0, scrollPosition);
-                }).catch(error => {
-                    console.error('[Auto-refresh] Error refreshing table:', error);
-                    // Continue polling even if there's an error
-                });
+                jobsTable.ajax.reload(null, false); // false = don't reset pagination
             }
         }
 
         // Initialize DataTable on page load
-        document.addEventListener('DOMContentLoaded', async function() {
+        document.addEventListener('DOMContentLoaded', function() {
             console.log('Initializing Processing Jobs DataTable...');
-            
-            // Load initial data
-            const jobs = await loadJobsData();
-            
-            // Initialize DataTable
+
+            // Initialize DataTable with server-side processing.
+            // Searches and pagination are handled by the backend API,
+            // so only the current page of data is ever fetched.
             jobsTable = $('#jobs-table').DataTable({
-                data: jobs,
+                serverSide: true,
+                processing: true,
+                searchDelay: 400,
+                ajax: function(dtData, callback, settings) {
+                    const page = dtData.start ? Math.floor(dtData.start / dtData.length) + 1 : 1;
+                    const pageSize = dtData.length;
+                    const search = dtData.search?.value || '';
+                    const statusFilter = $('#status-filter').val();
+
+                    // Map DataTables column index → API sort field
+                    const columnNames = ['id', 'flight_name', 'status', 'file_size', null, 'current_step', 'uploaded_by_email', 'created_at', null];
+                    let sortBy = '-created_at';
+                    if (dtData.order && dtData.order.length > 0) {
+                        const colIdx = dtData.order[0].column;
+                        const dir = dtData.order[0].dir;
+                        const field = columnNames[colIdx];
+                        if (field) {
+                            sortBy = (dir === 'desc' ? '-' : '') + field;
+                        }
+                    }
+
+                    const params = new URLSearchParams({ page, page_size: pageSize, sort_by: sortBy });
+                    if (search) params.set('search', search);
+                    if (statusFilter) params.set('status', statusFilter);
+
+                    fetch(`/api/processing-jobs/?${params}`)
+                        .then(r => r.json())
+                        .then(response => {
+                            callback({
+                                draw: dtData.draw,
+                                data: response.results,
+                                recordsTotal: response.count,
+                                recordsFiltered: response.count,
+                            });
+                        })
+                        .catch(error => {
+                            console.error('Error loading jobs:', error);
+                            callback({ draw: dtData.draw, data: [], recordsTotal: 0, recordsFiltered: 0 });
+                        });
+                },
                 columns: [
                     { 
                         data: 'id',
@@ -342,6 +373,13 @@
                                 <i class="bi bi-eye"></i> Details
                             </button>`;
                             
+                            // Add reset button for stuck PROCESSING jobs (admin only)
+                            if (row.status === 'PROCESSING' && IS_ADMIN) {
+                                buttons += ` <button class="btn btn-sm btn-warning mb-1" onclick="resetStuckJob(${row.id}, '${row.flight_name}')">
+                                    <i class="bi bi-arrow-counterclockwise"></i> Reset
+                                </button>`;
+                            }
+
                             // Add processed data link for completed jobs
                             if (row.status === 'COMPLETED') {
                                 // Link to processed data page showing the flight folder
@@ -390,15 +428,9 @@
                 responsive: true
             });
 
-            // Setup status filter
+            // Setup status filter: reload via server-side API (not client-side column search)
             $('#status-filter').on('change', function() {
-                const selectedStatus = this.value;
-                
-                if (selectedStatus === '') {
-                    jobsTable.column(2).search('').draw();
-                } else {
-                    jobsTable.column(2).search('^' + selectedStatus + '$', true, false).draw();
-                }
+                jobsTable.ajax.reload();
             });
 
             // Start auto-refresh (interval from settings)

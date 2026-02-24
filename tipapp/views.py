@@ -13,6 +13,7 @@ from django.http import JsonResponse, FileResponse
 from django.views.generic import base
 from django.contrib import auth
 from django.core.paginator import Paginator
+from django.db.models import Q
 from rest_framework.decorators import permission_classes, api_view
 from contextlib import redirect_stdout
 from django.core.management import call_command
@@ -210,21 +211,6 @@ def api_upload_thermal_files(request, *args, **kwargs):
             for chunk in uploaded_file.chunks():
                 destination.write(chunk)
         logger.info(f"File: [{uploaded_file.name}] has been successfully saved at [{save_path}].")
-        
-        # Create metadata file to track who uploaded this file
-        import json
-        from datetime import datetime, timezone
-        metadata_path = save_path + '.meta.json'
-        metadata = {
-            'uploaded_by': request.user.email if hasattr(request.user, 'email') else str(request.user),
-            'uploaded_by_username': request.user.username if hasattr(request.user, 'username') else str(request.user),
-            'uploaded_at': datetime.now(timezone.utc).isoformat(),
-            'original_filename': uploaded_file.name,
-            'saved_filename': newFileName,
-        }
-        with open(metadata_path, 'w') as f:
-            json.dump(metadata, f, indent=2)
-        logger.info(f"Metadata file created: [{metadata_path}]")
         
         # Phase 2: Create job record for tracking
         from tipapp.models import ThermalProcessingJob
@@ -484,7 +470,13 @@ def list_processing_jobs(request, *args, **kwargs):
     user_email_filter = request.GET.get('user_email', '').strip()
     if user_email_filter:
         jobs = jobs.filter(uploaded_by_email__icontains=user_email_filter)
-    
+
+    search = request.GET.get('search', '').strip()
+    if search:
+        jobs = jobs.filter(
+            Q(flight_name__icontains=search) | Q(original_filename__icontains=search)
+        )
+
     # Apply sorting
     sort_by = request.GET.get('sort_by', '-created_at')
     jobs = jobs.order_by(sort_by)
@@ -610,3 +602,40 @@ def get_job_status(request, job_id, *args, **kwargs):
     }
     
     return JsonResponse(response_data)
+
+
+@api_view(["POST"])
+@permission_classes([IsInAdministratorsGroup])
+def reset_stuck_job(request, job_id, *args, **kwargs):
+    """
+    Manually reset a stuck PROCESSING job to FAILED status.
+
+    Only jobs currently in PROCESSING state can be reset.
+    Intended for admins to fix jobs stuck due to a server crash/restart.
+    """
+    from tipapp.models import ThermalProcessingJob
+    from django.utils import timezone
+
+    try:
+        job = ThermalProcessingJob.objects.get(id=job_id)
+    except ThermalProcessingJob.DoesNotExist:
+        return JsonResponse({'error': 'Job not found'}, status=404)
+
+    if job.status != 'PROCESSING':
+        return JsonResponse(
+            {'error': f"Job is not in PROCESSING state (current status: {job.status})."},
+            status=400,
+        )
+
+    job.status = 'FAILED'
+    job.processing_completed_at = timezone.now()
+    job.error_message = (
+        f"Job manually reset by {request.user.email if hasattr(request.user, 'email') else request.user}. "
+        f"It was stuck in PROCESSING status, likely due to a server crash or restart."
+    )
+    job.current_step = 'Processing interrupted (manually reset)'
+    job.save(update_fields=['status', 'processing_completed_at', 'error_message', 'current_step'])
+
+    logger.info(f"Job {job.id} ({job.flight_name}) manually reset to FAILED by {request.user}.")
+
+    return JsonResponse({'message': f"Job {job.id} has been reset to FAILED.", 'job_id': job.id})
