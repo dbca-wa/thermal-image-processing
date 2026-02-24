@@ -16,7 +16,7 @@
             ],
             "django": true,
             "autoStartBrowser": false,
-
+            "justMyCode": false
         },
         {
             "name": "Debug: Process Imported Files",
@@ -27,7 +27,8 @@
             "args": [
                 "process_imported_files_command"
             ],
-            "django": true
+            "django": true,
+            "justMyCode": false
         }
     ]
 }
