@@ -1,4 +1,9 @@
-Hello,
+{% if not settings.PRODUCTION_EMAIL %}*** NON-PRODUCTION ENVIRONMENT: {{ settings.EMAIL_INSTANCE }} ***
+This email was intercepted and redirected by the system.
+Intended recipient: {{ intended_recipient }}
+*******************************************************
+
+{% endif %}Hello,
 
 The thermal image processing for flight {{ flight_name }} has completed successfully.
 
