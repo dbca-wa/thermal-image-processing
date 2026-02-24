@@ -13,6 +13,7 @@ from django.http import JsonResponse, FileResponse
 from django.views.generic import base
 from django.contrib import auth
 from django.core.paginator import Paginator
+from django.db.models import Q
 from rest_framework.decorators import permission_classes, api_view
 from contextlib import redirect_stdout
 from django.core.management import call_command
@@ -469,7 +470,13 @@ def list_processing_jobs(request, *args, **kwargs):
     user_email_filter = request.GET.get('user_email', '').strip()
     if user_email_filter:
         jobs = jobs.filter(uploaded_by_email__icontains=user_email_filter)
-    
+
+    search = request.GET.get('search', '').strip()
+    if search:
+        jobs = jobs.filter(
+            Q(flight_name__icontains=search) | Q(original_filename__icontains=search)
+        )
+
     # Apply sorting
     sort_by = request.GET.get('sort_by', '-created_at')
     jobs = jobs.order_by(sort_by)
