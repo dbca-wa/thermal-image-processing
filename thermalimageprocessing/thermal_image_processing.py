@@ -1,4 +1,5 @@
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -66,6 +67,15 @@ class Footprint:
         self.as_line = None
         self.as_poly = None
         self.districts = []
+
+
+class ArchiveValidationError(ValueError):
+    """Raised when an uploaded archive fails structural validation before processing."""
+    pass
+
+
+# Pattern for valid flight folder names: FireFlight_YYYYMMDD_HHMMSS or FireFlight_YYYYMMDD_HHMMSS_N
+_FLIGHT_NAME_PATTERN = re.compile(r'^FireFlight_\d{8}_\d{6}(_\d+)?$')
 
 def check_first_two_images_overlap(files):
     overlap = False
@@ -461,20 +471,130 @@ def publish_image_on_geoserver(flight_name, image_name=None):
         error_msg = f"Exception during Layer publication: {e}"
         logger.error(error_msg, exc_info=True)
 
+def validate_archive_structure(archive_path):
+    """
+    Validates the internal structure of a .7z archive before any file operations.
+
+    Checks:
+      1. Archive is readable (not corrupt).
+      2. Contains exactly one root-level directory.
+      3. Root directory name matches FireFlight_YYYYMMDD_HHMMSS (with optional _N suffix).
+      4. Contains a PNGs/CAMERA* sub-folder.
+      5. Contains a KML Boundaries/CAMERA* sub-folder.
+
+    Raises:
+        ArchiveValidationError: with a human-readable message describing the specific problem.
+        RuntimeError: if 7z is not installed.
+    """
+    filename = os.path.basename(archive_path)
+
+    # --- List archive contents ---
+    try:
+        result = subprocess.run(
+            ['7z', 'l', archive_path],
+            capture_output=True,
+            text=True,
+            check=True
+        )
+    except subprocess.CalledProcessError as e:
+        raise ArchiveValidationError(
+            f"The uploaded archive '{filename}' could not be opened. "
+            f"It may be corrupt or in an unsupported format. "
+            f"Detail: {e.stderr.strip()}"
+        )
+    except FileNotFoundError:
+        raise RuntimeError("7z is not installed or is not on the system PATH.")
+
+    listing = result.stdout
+
+    # --- Check 1: Find root-level directories (no '/' or '\\' in the name part) ---
+    root_dirs = []
+    for line in listing.split('\n'):
+        parts = line.split()
+        if (
+            len(parts) >= 6
+            and parts[2] == 'D....'
+            and '/' not in parts[5]
+            and '\\' not in parts[5]
+        ):
+            root_dirs.append(parts[5])
+
+    if not root_dirs:
+        raise ArchiveValidationError(
+            f"Invalid archive structure: '{filename}' contains no root-level folder. "
+            "The archive must contain a single top-level folder named "
+            "FireFlight_YYYYMMDD_HHMMSS (e.g. FireFlight_20240110_045153)."
+        )
+
+    if len(root_dirs) > 1:
+        raise ArchiveValidationError(
+            f"Invalid archive structure: '{filename}' contains multiple root-level folders "
+            f"({', '.join(root_dirs)}). The archive must contain exactly one top-level folder."
+        )
+
+    root_dir = root_dirs[0]
+
+    # --- Check 2: Root directory name matches expected pattern ---
+    if not _FLIGHT_NAME_PATTERN.match(root_dir):
+        raise ArchiveValidationError(
+            f"Invalid folder name: '{root_dir}' does not match the required naming convention "
+            "FireFlight_YYYYMMDD_HHMMSS (e.g. FireFlight_20240110_045153). "
+            "Please rename the top-level folder and re-upload."
+        )
+
+    # --- Check 3 & 4: Required sub-folders ---
+    # Use case-insensitive substring search on the full listing to handle both
+    # forward-slash and backslash path separators in the archive.
+    listing_lower = listing.lower()
+    has_pngs = 'pngs/camera' in listing_lower or 'pngs\\camera' in listing_lower
+    has_kml = 'kml boundaries/camera' in listing_lower or 'kml boundaries\\camera' in listing_lower
+
+    missing = []
+    if not has_pngs:
+        missing.append('PNGs/CAMERA1/')
+    if not has_kml:
+        missing.append('KML Boundaries/CAMERA1/')
+
+    if missing:
+        raise ArchiveValidationError(
+            f"Invalid archive structure: '{filename}' is missing required folder(s) inside '{root_dir}': "
+            + ', '.join(missing) + ". "
+            "Please ensure the archive contains both a PNGs/CAMERA* folder and a "
+            "'KML Boundaries/CAMERA*' folder."
+        )
+
+    logger.info(
+        f"Archive validation passed for '{filename}': "
+        f"root='{root_dir}', PNGs/CAMERA*=found, KML Boundaries/CAMERA*=found"
+    )
+
+
 def unzip_and_prepare(full_filename_path, target_dirname=None):
     """
     Handles file preparation: copying, moving, and unzipping.
     Replaces the functionality of the shell script.
-    
+
+    Validates the archive structure *before* any file operations so that a
+    malformed upload is caught early and flagged as FAILED without silently
+    disappearing into archives.
+
     Args:
         full_filename_path: Full path to the file to process
         target_dirname: Optional target directory name (used for duplicate uploads with suffix)
+
+    Raises:
+        ArchiveValidationError: if the archive structure is invalid (see validate_archive_structure).
     """
     # Get the base directory of the project
     # base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     
+    # Step 0: Validate archive structure BEFORE any file operations.
+    # This raises ArchiveValidationError immediately if the archive is invalid,
+    # leaving the original file untouched so the job can be marked FAILED cleanly.
+    validate_archive_structure(full_filename_path)
+
     filename = os.path.basename(full_filename_path)
-    
+
     # Logic to determine directory name (Removing extension and timestamp)
     if target_dirname:
         # Use provided directory name (for duplicate uploads with suffix)
