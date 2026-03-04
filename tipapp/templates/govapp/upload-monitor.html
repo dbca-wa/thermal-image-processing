@@ -238,7 +238,12 @@
         function refreshTable() {
             if (jobsTable) {
                 suppressLoader = true; // Polling refresh: suppress loader to avoid visual noise
-                jobsTable.ajax.reload(null, false); // false = don't reset pagination
+
+                // Preserve scroll position so polling does not jump the viewport
+                const scrollY = window.scrollY;
+                jobsTable.ajax.reload(function() {
+                    window.scrollTo({ top: scrollY, behavior: 'instant' });
+                }, false); // false = don't reset pagination
             }
         }
 
