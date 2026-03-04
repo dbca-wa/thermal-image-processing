@@ -53,9 +53,9 @@
                 </div>
 
                 <!-- Loader shown above the table (above Search jobs input), right-aligned -->
-                <!-- visibility toggled by ajax callbacks; display kept intact to avoid layout shifts -->
+                <!-- visibility + opacity transition provides a fade in/out without layout shifts -->
                 <div class="d-flex justify-content-end mb-1">
-                    <div id="jobs-table-loader" style="visibility:hidden;">
+                    <div id="jobs-table-loader" style="visibility:hidden; opacity:0; transition: opacity 0.3s ease, visibility 0.3s ease;">
                         <div class="d-flex align-items-center text-primary">
                             <div class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></div>
                             <span class="small">Loading...</span>
@@ -280,15 +280,18 @@
                     if (search) params.set('search', search);
                     if (statusFilter) params.set('status', statusFilter);
 
-                    // Show custom loader before fetch (only for user-triggered actions, not polling)
+                    // Show loader with fade (only for user-triggered actions, not polling)
                     const loader = document.getElementById('jobs-table-loader');
-                    if (!suppressLoader && loader) loader.style.visibility = 'visible';
+                    if (!suppressLoader && loader) {
+                        loader.style.visibility = 'visible';
+                        loader.style.opacity = '1';
+                    }
                     suppressLoader = false; // Reset flag for next request
 
                     fetch(`/api/processing-jobs/?${params}`)
                         .then(r => r.json())
                         .then(response => {
-                            if (loader) loader.style.visibility = 'hidden';
+                            if (loader) { loader.style.opacity = '0'; loader.style.visibility = 'hidden'; }
                             callback({
                                 draw: dtData.draw,
                                 data: response.results,
@@ -298,7 +301,7 @@
                         })
                         .catch(error => {
                             console.error('Error loading jobs:', error);
-                            if (loader) loader.style.visibility = 'hidden';
+                            if (loader) { loader.style.opacity = '0'; loader.style.visibility = 'hidden'; }
                             callback({ draw: dtData.draw, data: [], recordsTotal: 0, recordsFiltered: 0 });
                         });
                 },
