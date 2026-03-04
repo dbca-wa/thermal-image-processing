@@ -42,12 +42,14 @@
                     <div class="col-md-4">
                         <label for="status-filter" class="form-label">Status Filter</label>
                         <select id="status-filter" class="form-select">
-                            <option value="">All Statuses</option>
+                            <option value="">Active Only</option>
+                            <option value="ALL">All Statuses</option>
                             <option value="UPLOADED">Uploaded</option>
                             <option value="QUEUED">Queued</option>
                             <option value="PROCESSING">Processing</option>
                             <option value="COMPLETED">Completed</option>
                             <option value="FAILED">Failed</option>
+                            <option value="RETIRED">Retired</option>
                         </select>
                     </div>
                 </div>
@@ -126,7 +128,8 @@
                 'QUEUED': 'bg-info',
                 'PROCESSING': 'bg-primary',
                 'COMPLETED': 'bg-success',
-                'FAILED': 'bg-danger'
+                'FAILED': 'bg-danger',
+                'RETIRED': 'bg-secondary'
             };
             return `<span class="badge ${badges[status] || 'bg-secondary'}">${display}</span>`;
         }
@@ -137,7 +140,8 @@
                 'QUEUED': 'bg-info',
                 'PROCESSING': 'progress-bar-striped progress-bar-animated',
                 'COMPLETED': 'bg-success',
-                'FAILED': 'bg-danger'
+                'FAILED': 'bg-danger',
+                'RETIRED': 'bg-secondary'
             };
             return classes[status] || '';
         }
@@ -189,6 +193,7 @@
                             <p><strong>Started:</strong> ${formatDateTime(job.processing_started_at)}</p>
                             <p><strong>Completed:</strong> ${formatDateTime(job.processing_completed_at)}</p>
                             <p><strong>Duration:</strong> ${formatDuration(job.duration_seconds)}</p>
+                            ${job.retired_at ? `<p><strong>Retired:</strong> ${formatDateTime(job.retired_at)}</p>` : ''}
                         </div>
                     </div>
                     <hr>
@@ -210,6 +215,32 @@
             } catch (error) {
                 console.error('Error loading job details:', error);
                 alert('Error loading job details');
+            }
+        }
+
+        async function retireJob(jobId, flightName) {
+            if (!confirm(
+                `Retire "${flightName}"?\n\nThis will:\n` +
+                `\u2022 Rename the processed data folder (adds _retired_ suffix)\n` +
+                `\u2022 Delete GeoServer Coverage Stores for this flight\n` +
+                `\u2022 Delete PostGIS spatial records for this flight\n\n` +
+                `This cannot be undone.`
+            )) return;
+            try {
+                const response = await fetch(`/api/processing-jobs/${jobId}/retire/`, { method: 'POST', headers: { 'X-CSRFToken': getCookie('csrftoken') } });
+                const data = await response.json();
+                if (response.ok) {
+                    let msg = data.message;
+                    if (data.warnings && data.warnings.length > 0) {
+                        msg += '\n\nWarnings (non-fatal):\n' + data.warnings.join('\n');
+                    }
+                    alert(msg);
+                    refreshTable();
+                } else {
+                    alert('Error: ' + (data.error || 'Unknown error'));
+                }
+            } catch (error) {
+                alert('Request failed: ' + error);
             }
         }
 
@@ -278,7 +309,13 @@
 
                     const params = new URLSearchParams({ page, page_size: pageSize, sort_by: sortBy });
                     if (search) params.set('search', search);
-                    if (statusFilter) params.set('status', statusFilter);
+                    if (statusFilter === 'ALL') {
+                        // Include RETIRED jobs by disabling the active-only default
+                        params.set('active_only', 'false');
+                    } else if (statusFilter) {
+                        params.set('status', statusFilter);
+                    }
+                    // value="" (Active Only): no params sent -> backend defaults to active_only=true
 
                     // Show loader with fade (only for user-triggered actions, not polling)
                     const loader = document.getElementById('jobs-table-loader');
@@ -408,6 +445,13 @@
                                 </button>`;
                             }
 
+                            // Add retire button for completed jobs (admin only)
+                            if (row.status === 'COMPLETED' && IS_ADMIN) {
+                                buttons += ` <button class="btn btn-sm btn-outline-secondary mb-1" onclick="retireJob(${row.id}, '${row.flight_name}')">
+                                    <i class="bi bi-archive"></i> Retire
+                                </button>`;
+                            }
+
                             // Add processed data link for completed jobs
                             if (row.status === 'COMPLETED') {
                                 // Link to processed data page showing the flight folder
@@ -438,6 +482,12 @@
                         }
                     }
                 ],
+                createdRow: function(row, data, dataIndex) {
+                    // Visually mute retired job rows
+                    if (data.status === 'RETIRED') {
+                        $(row).css('opacity', '0.55');
+                    }
+                },
                 order: [[7, 'desc']], // Sort by Created descending (newest first)
                 pageLength: 10,
                 lengthMenu: [[10, 25, 50, 100, -1], [10, 25, 50, 100, "All"]],
