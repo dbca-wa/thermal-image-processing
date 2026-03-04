@@ -483,9 +483,11 @@
                     }
                 ],
                 createdRow: function(row, data, dataIndex) {
-                    // Visually mute retired job rows
+                    // Mute retired job rows by dimming all cells except the Actions column.
+                    // Applying opacity to the tr itself would affect buttons too (CSS opacity is not
+                    // overridable by children), so we target td cells individually instead.
                     if (data.status === 'RETIRED') {
-                        $(row).css('opacity', '0.55');
+                        $(row).find('td:not(:last-child)').css('opacity', '0.55');
                     }
                 },
                 order: [[7, 'desc']], // Sort by Created descending (newest first)
