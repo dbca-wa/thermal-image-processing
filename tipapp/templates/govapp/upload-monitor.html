@@ -42,13 +42,26 @@
                     <div class="col-md-4">
                         <label for="status-filter" class="form-label">Status Filter</label>
                         <select id="status-filter" class="form-select">
-                            <option value="">All Statuses</option>
+                            <option value="">Active Only</option>
+                            <option value="ALL">All Statuses</option>
                             <option value="UPLOADED">Uploaded</option>
                             <option value="QUEUED">Queued</option>
                             <option value="PROCESSING">Processing</option>
                             <option value="COMPLETED">Completed</option>
                             <option value="FAILED">Failed</option>
+                            <option value="RETIRED">Retired</option>
                         </select>
+                    </div>
+                </div>
+
+                <!-- Loader shown above the table (above Search jobs input), right-aligned -->
+                <!-- visibility + opacity transition provides a fade in/out without layout shifts -->
+                <div class="d-flex justify-content-end mb-1">
+                    <div id="jobs-table-loader" style="visibility:hidden; opacity:0; transition: opacity 0.3s ease, visibility 0.3s ease;">
+                        <div class="d-flex align-items-center text-primary">
+                            <div class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></div>
+                            <span class="small">Loading...</span>
+                        </div>
                     </div>
                 </div>
 
@@ -106,6 +119,8 @@
         let jobsTable = null;
         const IS_ADMIN = {{ has_upload_permission|yesno:'true,false' }};
         let autoRefreshInterval = null;
+        let refreshInterval = 0; // Stored in outer scope so retireJob can restart the interval
+        let suppressLoader = false; // When true, loader is hidden during the next ajax request (used for polling)
 
         // Helper functions
         function getStatusBadge(status, display) {
@@ -114,7 +129,8 @@
                 'QUEUED': 'bg-info',
                 'PROCESSING': 'bg-primary',
                 'COMPLETED': 'bg-success',
-                'FAILED': 'bg-danger'
+                'FAILED': 'bg-danger',
+                'RETIRED': 'bg-secondary'
             };
             return `<span class="badge ${badges[status] || 'bg-secondary'}">${display}</span>`;
         }
@@ -125,7 +141,8 @@
                 'QUEUED': 'bg-info',
                 'PROCESSING': 'progress-bar-striped progress-bar-animated',
                 'COMPLETED': 'bg-success',
-                'FAILED': 'bg-danger'
+                'FAILED': 'bg-danger',
+                'RETIRED': 'bg-secondary'
             };
             return classes[status] || '';
         }
@@ -177,6 +194,7 @@
                             <p><strong>Started:</strong> ${formatDateTime(job.processing_started_at)}</p>
                             <p><strong>Completed:</strong> ${formatDateTime(job.processing_completed_at)}</p>
                             <p><strong>Duration:</strong> ${formatDuration(job.duration_seconds)}</p>
+                            ${job.retired_at ? `<p><strong>Retired:</strong> ${formatDateTime(job.retired_at)}</p>` : ''}
                         </div>
                     </div>
                     <hr>
@@ -198,6 +216,80 @@
             } catch (error) {
                 console.error('Error loading job details:', error);
                 alert('Error loading job details');
+            }
+        }
+
+        async function retireJob(jobId, flightName, btn) {
+            if (!confirm(
+                `Retire "${flightName}"?\n\nThis will:\n` +
+                `\u2022 Rename the processed data folder (adds _retired_ suffix)\n` +
+                `\u2022 Delete GeoServer Coverage Stores for this flight\n` +
+                `\u2022 Delete PostGIS spatial records for this flight\n\n` +
+                `This cannot be undone.`
+            )) return;
+
+            // Pause auto-refresh immediately so it doesn't overwrite the spinner
+            // while the server is performing the (potentially slow) GeoServer deletion
+            if (autoRefreshInterval) {
+                clearInterval(autoRefreshInterval);
+                autoRefreshInterval = null;
+            }
+
+            // Show loading state on the button
+            const originalHtml = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = `<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Retiring...`;
+
+            try {
+                const response = await fetch(`/api/processing-jobs/${jobId}/retire/`, { method: 'POST', headers: { 'X-CSRFToken': getCookie('csrftoken') } });
+                const data = await response.json();
+                if (response.ok) {
+                    let msg = data.message;
+                    if (data.warnings && data.warnings.length > 0) {
+                        msg += '\n\nWarnings (non-fatal):\n' + data.warnings.join('\n');
+                    }
+                    alert(msg);
+                    // Slide up the row, then refresh and restart auto-refresh
+                    const row = btn.closest('tr');
+                    const height = row.offsetHeight;
+                    row.style.overflow = 'hidden';
+                    row.style.transition = 'none';
+                    row.style.height = height + 'px';
+                    row.style.opacity = '1';
+                    // Use double rAF to ensure the browser has applied the initial values
+                    // before starting the transition
+                    requestAnimationFrame(function() {
+                        requestAnimationFrame(function() {
+                            row.style.transition = 'height 0.8s ease, opacity 0.8s ease, padding 0.8s ease';
+                            row.style.height = '0';
+                            row.style.opacity = '0';
+                            row.style.paddingTop = '0';
+                            row.style.paddingBottom = '0';
+                            setTimeout(function() {
+                                refreshTable();
+                                if (refreshInterval > 0) {
+                                    autoRefreshInterval = setInterval(refreshTable, refreshInterval);
+                                }
+                            }, 900);
+                        });
+                    });
+                } else {
+                    btn.disabled = false;
+                    btn.innerHTML = originalHtml;
+                    // Restart auto-refresh on error
+                    if (refreshInterval > 0 && !autoRefreshInterval) {
+                        autoRefreshInterval = setInterval(refreshTable, refreshInterval);
+                    }
+                    alert('Error: ' + (data.error || 'Unknown error'));
+                }
+            } catch (error) {
+                btn.disabled = false;
+                btn.innerHTML = originalHtml;
+                // Restart auto-refresh on error
+                if (refreshInterval > 0 && !autoRefreshInterval) {
+                    autoRefreshInterval = setInterval(refreshTable, refreshInterval);
+                }
+                alert('Request failed: ' + error);
             }
         }
 
@@ -225,7 +317,13 @@
 
         function refreshTable() {
             if (jobsTable) {
-                jobsTable.ajax.reload(null, false); // false = don't reset pagination
+                suppressLoader = true; // Polling refresh: suppress loader to avoid visual noise
+
+                // Preserve scroll position so polling does not jump the viewport
+                const scrollY = window.scrollY;
+                jobsTable.ajax.reload(function() {
+                    window.scrollTo({ top: scrollY, behavior: 'instant' });
+                }, false); // false = don't reset pagination
             }
         }
 
@@ -238,7 +336,7 @@
             // so only the current page of data is ever fetched.
             jobsTable = $('#jobs-table').DataTable({
                 serverSide: true,
-                processing: true,
+                processing: false, // Disable built-in center overlay; custom loader is used instead
                 searchDelay: 400,
                 ajax: function(dtData, callback, settings) {
                     const page = dtData.start ? Math.floor(dtData.start / dtData.length) + 1 : 1;
@@ -260,11 +358,26 @@
 
                     const params = new URLSearchParams({ page, page_size: pageSize, sort_by: sortBy });
                     if (search) params.set('search', search);
-                    if (statusFilter) params.set('status', statusFilter);
+                    if (statusFilter === 'ALL') {
+                        // Include RETIRED jobs by disabling the active-only default
+                        params.set('active_only', 'false');
+                    } else if (statusFilter) {
+                        params.set('status', statusFilter);
+                    }
+                    // value="" (Active Only): no params sent -> backend defaults to active_only=true
+
+                    // Show loader with fade (only for user-triggered actions, not polling)
+                    const loader = document.getElementById('jobs-table-loader');
+                    if (!suppressLoader && loader) {
+                        loader.style.visibility = 'visible';
+                        loader.style.opacity = '1';
+                    }
+                    suppressLoader = false; // Reset flag for next request
 
                     fetch(`/api/processing-jobs/?${params}`)
                         .then(r => r.json())
                         .then(response => {
+                            if (loader) { loader.style.opacity = '0'; loader.style.visibility = 'hidden'; }
                             callback({
                                 draw: dtData.draw,
                                 data: response.results,
@@ -274,6 +387,7 @@
                         })
                         .catch(error => {
                             console.error('Error loading jobs:', error);
+                            if (loader) { loader.style.opacity = '0'; loader.style.visibility = 'hidden'; }
                             callback({ draw: dtData.draw, data: [], recordsTotal: 0, recordsFiltered: 0 });
                         });
                 },
@@ -380,6 +494,13 @@
                                 </button>`;
                             }
 
+                            // Add retire button for completed jobs (admin only)
+                            if (row.status === 'COMPLETED' && IS_ADMIN) {
+                                buttons += ` <button class="btn btn-sm btn-outline-secondary mb-1" onclick="retireJob(${row.id}, '${row.flight_name}', this)">
+                                    <i class="bi bi-archive"></i> Retire
+                                </button>`;
+                            }
+
                             // Add processed data link for completed jobs
                             if (row.status === 'COMPLETED') {
                                 // Link to processed data page showing the flight folder
@@ -410,6 +531,14 @@
                         }
                     }
                 ],
+                createdRow: function(row, data, dataIndex) {
+                    // Mute retired job rows by dimming all cells except the Actions column.
+                    // Applying opacity to the tr itself would affect buttons too (CSS opacity is not
+                    // overridable by children), so we target td cells individually instead.
+                    if (data.status === 'RETIRED') {
+                        $(row).find('td:not(:last-child)').css('opacity', '0.55');
+                    }
+                },
                 order: [[7, 'desc']], // Sort by Created descending (newest first)
                 pageLength: 10,
                 lengthMenu: [[10, 25, 50, 100, -1], [10, 25, 50, 100, "All"]],
@@ -434,7 +563,7 @@
             });
 
             // Start auto-refresh (interval from settings)
-            const refreshInterval = {{ auto_refresh_interval|default:3 }} * 1000;
+            refreshInterval = {{ auto_refresh_interval|default:3 }} * 1000;
             autoRefreshInterval = setInterval(refreshTable, refreshInterval);
             
             console.log('DataTable initialized with', refreshInterval / 1000, 'seconds auto-refresh');

@@ -25,6 +25,7 @@ class ThermalProcessingJob(models.Model):
         ('PROCESSING', 'Processing'),       # Currently being processed
         ('COMPLETED', 'Completed'),         # Successfully processed
         ('FAILED', 'Failed'),               # Processing failed with errors
+        ('RETIRED', 'Retired'),             # Deliberately retired: folder renamed, GeoServer and PostGIS data removed
     ]
     
     # Note: id field uses Django's default BigAutoField (auto-incrementing integer)
@@ -107,6 +108,12 @@ class ThermalProcessingJob(models.Model):
         blank=True,
         help_text="When processing finished (success or failure)"
     )
+
+    retired_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When the job was retired (folder renamed, GeoServer and PostGIS data removed)"
+    )
     
     # Processing results
     output_geopackage_path = models.CharField(
@@ -178,3 +185,7 @@ class ThermalProcessingJob(models.Model):
     def is_failed(self):
         """Check if the job failed."""
         return self.status == 'FAILED'
+
+    def is_retired(self):
+        """Check if the job has been retired (folder renamed, GeoServer and PostGIS data removed)."""
+        return self.status == 'RETIRED'
