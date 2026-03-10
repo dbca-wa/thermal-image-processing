@@ -739,7 +739,11 @@ def retire_job(request, job_id, *args, **kwargs):
 
             # Delete each store with recurse=true to cascade-delete layers
             for store_name in stores_to_delete:
-                delete_url = f"{gs_url_base}{store_name}?recurse=true"
+                # GeoServer REST API treats the last dot-separated segment as a format
+                # specifier, so a store named "foo.tif" accessed as ".../foo.tif" is
+                # parsed as store="foo", format="tif" -> 404.
+                # Appending ".json" makes GeoServer parse it as store="foo.tif", format="json".
+                delete_url = f"{gs_url_base}{store_name}.json?recurse=true"
                 del_response = http_requests.delete(
                     delete_url,
                     auth=(gs_user, gs_pwd),
