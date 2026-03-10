@@ -334,7 +334,12 @@ DISTRICTS_KB_URL = decouple.config(
         "&outputFormat=application%2Fx-gpkg"
     ),
 )
-DISTRICTS_GPKG_PATH = decouple.config("general_districts_dataset_name", default=None)
+_districts_raw = decouple.config("general_districts_dataset_name", default=None)
+# Resolve relative paths from BASE_DIR (project root)
+if _districts_raw and not os.path.isabs(_districts_raw):
+    DISTRICTS_GPKG_PATH = str(BASE_DIR / _districts_raw)
+else:
+    DISTRICTS_GPKG_PATH = _districts_raw
 
 PENDING_IMPORT_PATH = decouple.config("PENDING_IMPORT_PATH", default=os.path.join(BASE_DIR, PENDING_IMPORT_FOLDER_NAME))
 DATA_STORAGE = decouple.config("DATA_STORAGE", default=os.path.join(BASE_DIR, DATA_STORAGE_FOLDER_NAME))
