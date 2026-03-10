@@ -279,7 +279,8 @@ GROUP_OFFICERS = 'Officers'
 #CRON_SCANNER_CLASS = "govapp.apps.catalogue.cron.ScannerCronJob"
 
 CRON_CLASSES = [
-    'appmonitor_client.cron.CronJobAppMonitorClient'
+    'appmonitor_client.cron.CronJobAppMonitorClient',
+    'tipapp.management.commands.sync_districts_from_kb.SyncDistrictsFromKBCronJob',
 ]
 MANAGEMENT_COMMANDS_PAGE_ENABLED = decouple.config('MANAGEMENT_COMMANDS_PAGE_ENABLED', default=False)
 
@@ -322,6 +323,23 @@ PENDING_IMPORT_FOLDER_NAME = "pending_imports"
 DATA_STORAGE_FOLDER_NAME = "thermal_data_processing"
 DOWNLOADS_FOLDER_NAME = "thermal_downloads"
 UPLOADS_HISTORY_FOLDER_NAME = "thermal_files_uploaded"
+
+# District spatial data sync from KB (Kaartdijin Boodja)
+DISTRICTS_KB_URL = decouple.config(
+    "general_districts_kb_url",
+    default=(
+        "https://kb.dbca.wa.gov.au/geoserver/kaartdijin-boodja-public/ows"
+        "?service=WFS&version=1.0.0&request=GetFeature"
+        "&typeName=kaartdijin-boodja-public%3ACPT_DBCA_DISTRICTS"
+        "&outputFormat=application%2Fx-gpkg"
+    ),
+)
+_districts_raw = decouple.config("general_districts_dataset_name", default=None)
+# Resolve relative paths from BASE_DIR (project root)
+if _districts_raw and not os.path.isabs(_districts_raw):
+    DISTRICTS_GPKG_PATH = str(BASE_DIR / _districts_raw)
+else:
+    DISTRICTS_GPKG_PATH = _districts_raw
 
 PENDING_IMPORT_PATH = decouple.config("PENDING_IMPORT_PATH", default=os.path.join(BASE_DIR, PENDING_IMPORT_FOLDER_NAME))
 DATA_STORAGE = decouple.config("DATA_STORAGE", default=os.path.join(BASE_DIR, DATA_STORAGE_FOLDER_NAME))
