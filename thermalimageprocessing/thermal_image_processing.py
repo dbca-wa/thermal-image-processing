@@ -57,7 +57,7 @@ logger.debug(f'postgis_table: {postgis_table}')
 container_name = os.environ.get('general_container_name') # config.get('general', 'container_name')
 # blob_service_client = BlobServiceClient.from_connection_string(azure_conn_string)
 districts_dataset_name = os.environ.get('general_districts_dataset_name') # config.get('general', 'districts_dataset_name')
-districts_gpkg = os.path.join(os.path.dirname(__file__), districts_dataset_name)
+districts_gpkg = os.path.join(os.path.dirname(__file__), districts_dataset_name) if districts_dataset_name and not os.path.isabs(districts_dataset_name) else districts_dataset_name
 districts_layer_name = os.environ.get('general_districts_layer_name') #config.get('general', 'districts_layer_name')
 user = os.environ.get('geoserver_user') #config.get('geoserver', 'user')
 gs_pwd = os.environ.get('geoserver_password') #config.get('geoserver', 'gs_pwd')
