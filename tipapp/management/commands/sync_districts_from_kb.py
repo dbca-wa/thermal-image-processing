@@ -17,6 +17,7 @@ from pathlib import Path
 
 import requests
 from django.core.management import base
+from django_cron import CronJobBase, Schedule
 
 from tipapp import settings
 
@@ -74,6 +75,24 @@ class DistrictsLayerSync:
             return tmp_path, None
         except Exception as e:
             return None, f"Error downloading layer: {str(e)}"
+
+
+class SyncDistrictsFromKBCronJob(CronJobBase):
+    """django-cron job: sync districts gpkg from KB once daily."""
+    RUN_AT_TIMES = ['02:00']
+    schedule = Schedule(run_at_times=RUN_AT_TIMES)
+    code = 'tipapp.SyncDistrictsFromKBCronJob'
+
+    def do(self):
+        url = settings.DISTRICTS_KB_URL
+        dest_path = settings.DISTRICTS_GPKG_PATH
+        if not dest_path:
+            logger.error(
+                "general_districts_dataset_name is not set. "
+                "Cannot determine destination path for district file."
+            )
+            return
+        DistrictsLayerSync(url=url, dest_path=dest_path).run_sync()
 
 
 class Command(base.BaseCommand):

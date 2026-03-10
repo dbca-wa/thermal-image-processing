@@ -279,7 +279,8 @@ GROUP_OFFICERS = 'Officers'
 #CRON_SCANNER_CLASS = "govapp.apps.catalogue.cron.ScannerCronJob"
 
 CRON_CLASSES = [
-    'appmonitor_client.cron.CronJobAppMonitorClient'
+    'appmonitor_client.cron.CronJobAppMonitorClient',
+    'tipapp.management.commands.sync_districts_from_kb.SyncDistrictsFromKBCronJob',
 ]
 MANAGEMENT_COMMANDS_PAGE_ENABLED = decouple.config('MANAGEMENT_COMMANDS_PAGE_ENABLED', default=False)
 
