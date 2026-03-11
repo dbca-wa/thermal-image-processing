@@ -763,7 +763,30 @@ def retire_job(request, job_id, *args, **kwargs):
         logger.warning("GeoServer credentials not set; skipping GeoServer deletion.")
 
     # ------------------------------------------------------------------
-    # Step 3: Delete PostGIS records
+    # Step 3: Delete TIF files from GeoServer storage (rclone mount)
+    # ------------------------------------------------------------------
+    import shutil
+    gs_storage_base = "/rclone-mounts/thermalimaging-flightmosaics"
+    mosaic_tif = os.path.join(gs_storage_base, f"{flight_name}.tif")
+    images_dir = os.path.join(gs_storage_base, f"{flight_name}_images")
+
+    for path, label in [(mosaic_tif, "mosaic TIF"), (images_dir, "images directory")]:
+        if os.path.exists(path):
+            try:
+                if os.path.isdir(path):
+                    shutil.rmtree(path)
+                else:
+                    os.remove(path)
+                logger.info(f"Deleted GeoServer storage {label}: {path}")
+            except Exception as e:
+                error_msg = f"Failed to delete GeoServer storage {label} '{path}': {e}"
+                logger.error(error_msg, exc_info=True)
+                errors.append(error_msg)
+        else:
+            logger.warning(f"GeoServer storage {label} not found (may have been removed already): {path}")
+
+    # ------------------------------------------------------------------
+    # Step 4: Delete PostGIS records
     # ------------------------------------------------------------------
     raw_postgis_url = os.environ.get('general_postgis_table', '')
     if raw_postgis_url:
@@ -786,7 +809,7 @@ def retire_job(request, job_id, *args, **kwargs):
         logger.warning("general_postgis_table not set; skipping PostGIS deletion.")
 
     # ------------------------------------------------------------------
-    # Step 4: Update job record to RETIRED
+    # Step 5: Update job record to RETIRED
     # ------------------------------------------------------------------
     now = timezone.now()
     job.status = 'RETIRED'
