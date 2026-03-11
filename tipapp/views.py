@@ -685,23 +685,22 @@ def retire_job(request, job_id, *args, **kwargs):
     flight_name = job.flight_name
     # flight_timestamp is used for GeoServer store names and PostGIS flight_datetime column
     flight_timestamp = flight_name.replace("FireFlight_", "")
-    retired_suffix = f"_retired_{timezone.now().strftime('%Y%m%d_%H%M%S')}"
 
     errors = []
 
     # ------------------------------------------------------------------
-    # Step 1: Rename the processed data folder
+    # Step 1: Move the processed data folder to the retired archive
     # ------------------------------------------------------------------
-    data_storage = settings.DATA_STORAGE
-    original_folder = os.path.join(data_storage, flight_name)
-    retired_folder = os.path.join(data_storage, flight_name + retired_suffix)
+    import shutil as _shutil
+    original_folder = os.path.join(settings.DATA_STORAGE, flight_name)
+    retired_dest = os.path.join(settings.RETIRED_STORAGE, flight_name)
 
     if os.path.exists(original_folder):
         try:
-            os.rename(original_folder, retired_folder)
-            logger.info(f"Retired folder renamed: {original_folder} -> {retired_folder}")
+            _shutil.move(original_folder, retired_dest)
+            logger.info(f"Retired folder moved: {original_folder} -> {retired_dest}")
         except Exception as e:
-            error_msg = f"Failed to rename folder: {e}"
+            error_msg = f"Failed to move folder to retired archive: {e}"
             logger.error(error_msg, exc_info=True)
             errors.append(error_msg)
     else:
@@ -739,7 +738,11 @@ def retire_job(request, job_id, *args, **kwargs):
 
             # Delete each store with recurse=true to cascade-delete layers
             for store_name in stores_to_delete:
-                delete_url = f"{gs_url_base}{store_name}?recurse=true"
+                # GeoServer REST API treats the last dot-separated segment as a format
+                # specifier, so a store named "foo.tif" accessed as ".../foo.tif" is
+                # parsed as store="foo", format="tif" -> 404.
+                # Appending ".json" makes GeoServer parse it as store="foo.tif", format="json".
+                delete_url = f"{gs_url_base}{store_name}.json?recurse=true"
                 del_response = http_requests.delete(
                     delete_url,
                     auth=(gs_user, gs_pwd),
@@ -759,7 +762,30 @@ def retire_job(request, job_id, *args, **kwargs):
         logger.warning("GeoServer credentials not set; skipping GeoServer deletion.")
 
     # ------------------------------------------------------------------
-    # Step 3: Delete PostGIS records
+    # Step 3: Delete TIF files from GeoServer storage (rclone mount)
+    # ------------------------------------------------------------------
+    import shutil
+    gs_storage_base = "/rclone-mounts/thermalimaging-flightmosaics"
+    mosaic_tif = os.path.join(gs_storage_base, f"{flight_name}.tif")
+    images_dir = os.path.join(gs_storage_base, f"{flight_name}_images")
+
+    for path, label in [(mosaic_tif, "mosaic TIF"), (images_dir, "images directory")]:
+        if os.path.exists(path):
+            try:
+                if os.path.isdir(path):
+                    shutil.rmtree(path)
+                else:
+                    os.remove(path)
+                logger.info(f"Deleted GeoServer storage {label}: {path}")
+            except Exception as e:
+                error_msg = f"Failed to delete GeoServer storage {label} '{path}': {e}"
+                logger.error(error_msg, exc_info=True)
+                errors.append(error_msg)
+        else:
+            logger.warning(f"GeoServer storage {label} not found (may have been removed already): {path}")
+
+    # ------------------------------------------------------------------
+    # Step 4: Delete PostGIS records
     # ------------------------------------------------------------------
     raw_postgis_url = os.environ.get('general_postgis_table', '')
     if raw_postgis_url:
@@ -782,7 +808,7 @@ def retire_job(request, job_id, *args, **kwargs):
         logger.warning("general_postgis_table not set; skipping PostGIS deletion.")
 
     # ------------------------------------------------------------------
-    # Step 4: Update job record to RETIRED
+    # Step 5: Update job record to RETIRED
     # ------------------------------------------------------------------
     now = timezone.now()
     job.status = 'RETIRED'
