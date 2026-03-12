@@ -26,6 +26,9 @@ class ThermalProcessingJob(models.Model):
         ('COMPLETED', 'Completed'),         # Successfully processed
         ('FAILED', 'Failed'),               # Processing failed with errors
         ('RETIRED', 'Retired'),             # Deliberately retired: folder renamed, GeoServer and PostGIS data removed
+        ('RETIRE_QUEUED', 'Retire Queued'),  # Retire requested, waiting for cron job to process
+        ('RETIRING', 'Retiring'),           # Retire is currently being processed by cron job
+        ('RETIRE_FAILED', 'Retire Failed'), # Retire processing failed with errors
     ]
     
     # Note: id field uses Django's default BigAutoField (auto-incrementing integer)
@@ -189,3 +192,15 @@ class ThermalProcessingJob(models.Model):
     def is_retired(self):
         """Check if the job has been retired (folder renamed, GeoServer and PostGIS data removed)."""
         return self.status == 'RETIRED'
+
+    def is_retire_queued(self):
+        """Check if the job is queued for retirement."""
+        return self.status == 'RETIRE_QUEUED'
+
+    def is_retiring(self):
+        """Check if the job is currently being retired."""
+        return self.status == 'RETIRING'
+
+    def is_retire_failed(self):
+        """Check if the retire processing failed."""
+        return self.status == 'RETIRE_FAILED'
