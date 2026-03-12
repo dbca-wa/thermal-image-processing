@@ -670,9 +670,9 @@ def retire_job(request, job_id, *args, **kwargs):
     except ThermalProcessingJob.DoesNotExist:
         return JsonResponse({'error': 'Job not found'}, status=404)
 
-    if job.status != 'COMPLETED':
+    if job.status not in ('COMPLETED', 'RETIRE_FAILED'):
         return JsonResponse(
-            {'error': f"Only COMPLETED jobs can be retired (current status: {job.status})."},
+            {'error': f"Only COMPLETED or RETIRE_FAILED jobs can be queued for retirement (current status: {job.status})."},
             status=400,
         )
 

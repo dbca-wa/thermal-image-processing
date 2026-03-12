@@ -50,6 +50,9 @@
                             <option value="COMPLETED">Completed</option>
                             <option value="FAILED">Failed</option>
                             <option value="RETIRED">Retired</option>
+                            <option value="RETIRE_QUEUED">Retire Queued</option>
+                            <option value="RETIRING">Retiring</option>
+                            <option value="RETIRE_FAILED">Retire Failed</option>
                         </select>
                     </div>
                 </div>
@@ -130,7 +133,10 @@
                 'PROCESSING': 'bg-primary',
                 'COMPLETED': 'bg-success',
                 'FAILED': 'bg-danger',
-                'RETIRED': 'bg-secondary'
+                'RETIRED': 'bg-secondary',
+                'RETIRE_QUEUED': 'bg-warning text-dark',
+                'RETIRING': 'bg-warning text-dark',
+                'RETIRE_FAILED': 'bg-danger'
             };
             return `<span class="badge ${badges[status] || 'bg-secondary'}">${display}</span>`;
         }
@@ -142,7 +148,10 @@
                 'PROCESSING': 'progress-bar-striped progress-bar-animated',
                 'COMPLETED': 'bg-success',
                 'FAILED': 'bg-danger',
-                'RETIRED': 'bg-secondary'
+                'RETIRED': 'bg-secondary',
+                'RETIRE_QUEUED': 'bg-warning',
+                'RETIRING': 'progress-bar-striped progress-bar-animated bg-warning',
+                'RETIRE_FAILED': 'bg-danger'
             };
             return classes[status] || '';
         }
@@ -221,74 +230,31 @@
 
         async function retireJob(jobId, flightName, btn) {
             if (!confirm(
-                `Retire "${flightName}"?\n\nThis will:\n` +
-                `\u2022 Move the processed data folder to the retired archive\n` +
-                `\u2022 Delete GeoServer Coverage Stores for this flight\n` +
-                `\u2022 Delete PostGIS spatial records for this flight\n\n` +
+                `Retire "${flightName}"?\n\n` +
+                `The job will be queued for retirement. The actual cleanup ` +
+                `(folder move, GeoServer, PostGIS) will run in the background.\n\n` +
                 `This cannot be undone.`
             )) return;
-
-            // Pause auto-refresh immediately so it doesn't overwrite the spinner
-            // while the server is performing the (potentially slow) GeoServer deletion
-            if (autoRefreshInterval) {
-                clearInterval(autoRefreshInterval);
-                autoRefreshInterval = null;
-            }
 
             // Show loading state on the button
             const originalHtml = btn.innerHTML;
             btn.disabled = true;
-            btn.innerHTML = `<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Retiring...`;
+            btn.innerHTML = `<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Queuing...`;
 
             try {
                 const response = await fetch(`/api/processing-jobs/${jobId}/retire/`, { method: 'POST', headers: { 'X-CSRFToken': getCookie('csrftoken') } });
                 const data = await response.json();
                 if (response.ok) {
-                    let msg = data.message;
-                    if (data.warnings && data.warnings.length > 0) {
-                        msg += '\n\nWarnings (non-fatal):\n' + data.warnings.join('\n');
-                    }
-                    alert(msg);
-                    // Slide up the row, then refresh and restart auto-refresh
-                    const row = btn.closest('tr');
-                    const height = row.offsetHeight;
-                    row.style.overflow = 'hidden';
-                    row.style.transition = 'none';
-                    row.style.height = height + 'px';
-                    row.style.opacity = '1';
-                    // Use double rAF to ensure the browser has applied the initial values
-                    // before starting the transition
-                    requestAnimationFrame(function() {
-                        requestAnimationFrame(function() {
-                            row.style.transition = 'height 0.8s ease, opacity 0.8s ease, padding 0.8s ease';
-                            row.style.height = '0';
-                            row.style.opacity = '0';
-                            row.style.paddingTop = '0';
-                            row.style.paddingBottom = '0';
-                            setTimeout(function() {
-                                refreshTable();
-                                if (refreshInterval > 0) {
-                                    autoRefreshInterval = setInterval(refreshTable, refreshInterval);
-                                }
-                            }, 900);
-                        });
-                    });
+                    // Job is now RETIRE_QUEUED — just refresh the table row
+                    refreshTable();
                 } else {
                     btn.disabled = false;
                     btn.innerHTML = originalHtml;
-                    // Restart auto-refresh on error
-                    if (refreshInterval > 0 && !autoRefreshInterval) {
-                        autoRefreshInterval = setInterval(refreshTable, refreshInterval);
-                    }
                     alert('Error: ' + (data.error || 'Unknown error'));
                 }
             } catch (error) {
                 btn.disabled = false;
                 btn.innerHTML = originalHtml;
-                // Restart auto-refresh on error
-                if (refreshInterval > 0 && !autoRefreshInterval) {
-                    autoRefreshInterval = setInterval(refreshTable, refreshInterval);
-                }
                 alert('Request failed: ' + error);
             }
         }
@@ -502,6 +468,13 @@
                                 </button>`;
                             }
 
+                            // Add retry button for retire-failed jobs (admin only)
+                            if (row.status === 'RETIRE_FAILED' && IS_ADMIN) {
+                                buttons += ` <button class="btn btn-sm btn-outline-danger mb-1" onclick="retireJob(${row.id}, '${row.flight_name}', this)">
+                                    <i class="bi bi-arrow-repeat"></i> Retry Retire
+                                </button>`;
+                            }
+
                             // Add processed data link for completed jobs
                             if (row.status === 'COMPLETED') {
                                 // Link to processed data page showing the flight folder
@@ -533,10 +506,10 @@
                     }
                 ],
                 createdRow: function(row, data, dataIndex) {
-                    // Mute retired job rows by dimming all cells except the Actions column.
+                    // Mute retired/retiring job rows by dimming all cells except the Actions column.
                     // Applying opacity to the tr itself would affect buttons too (CSS opacity is not
                     // overridable by children), so we target td cells individually instead.
-                    if (data.status === 'RETIRED') {
+                    if (['RETIRED', 'RETIRE_QUEUED', 'RETIRING'].includes(data.status)) {
                         $(row).find('td:not(:last-child)').css('opacity', '0.55');
                     }
                 },
