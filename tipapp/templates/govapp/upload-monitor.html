@@ -42,17 +42,21 @@
                     <div class="col-md-4">
                         <label for="status-filter" class="form-label">Status Filter</label>
                         <select id="status-filter" class="form-select">
-                            <option value="">Active Only</option>
-                            <option value="ALL">All Statuses</option>
-                            <option value="UPLOADED">Uploaded</option>
-                            <option value="QUEUED">Queued</option>
-                            <option value="PROCESSING">Processing</option>
-                            <option value="COMPLETED">Completed</option>
-                            <option value="FAILED">Failed</option>
-                            <option value="RETIRED">Retired</option>
-                            <option value="RETIRE_QUEUED">Retire Queued</option>
-                            <option value="RETIRING">Retiring</option>
-                            <option value="RETIRE_FAILED">Retire Failed</option>
+                            <optgroup label="Presets">
+                                <option value="">Exclude Retired (default)</option>
+                                <option value="ALL">All Statuses</option>
+                            </optgroup>
+                            <optgroup label="By Status">
+                                <option value="UPLOADED">Uploaded</option>
+                                <option value="QUEUED">Queued</option>
+                                <option value="PROCESSING">Processing</option>
+                                <option value="COMPLETED">Completed</option>
+                                <option value="FAILED">Failed</option>
+                                <option value="RETIRED">Retired</option>
+                                <option value="RETIRE_QUEUED">Retire Queued</option>
+                                <option value="RETIRING">Retiring</option>
+                                <option value="RETIRE_FAILED">Retire Failed</option>
+                            </optgroup>
                         </select>
                     </div>
                 </div>
