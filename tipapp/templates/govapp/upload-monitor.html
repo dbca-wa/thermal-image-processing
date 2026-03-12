@@ -402,15 +402,25 @@
                         orderable: false,
                         render: function(data, type, row) {
                             if (type === 'display') {
+                                // For retire statuses the original progress_percentage (100 from
+                                // COMPLETED) is misleading. Show a retire-specific value instead.
+                                const retireProgress = {
+                                    'RETIRE_QUEUED': 0,
+                                    'RETIRING': 50,
+                                    'RETIRE_FAILED': 0,
+                                };
+                                const pct = row.status in retireProgress
+                                    ? retireProgress[row.status]
+                                    : row.progress_percentage;
                                 return `
                                     <div class="progress" style="height: 20px;">
                                         <div class="progress-bar ${getProgressBarClass(row.status)}" 
                                              role="progressbar" 
-                                             style="width: ${row.progress_percentage}%"
-                                             aria-valuenow="${row.progress_percentage}" 
+                                             style="width: ${pct}%"
+                                             aria-valuenow="${pct}" 
                                              aria-valuemin="0" 
                                              aria-valuemax="100">
-                                            ${row.progress_percentage}%
+                                            ${pct}%
                                         </div>
                                     </div>
                                 `;
