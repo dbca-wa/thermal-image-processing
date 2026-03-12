@@ -124,6 +124,8 @@
         let autoRefreshInterval = null;
         let refreshInterval = 0; // Stored in outer scope so retireJob can restart the interval
         let suppressLoader = false; // When true, loader is hidden during the next ajax request (used for polling)
+        let enableSlideAnimation = false; // When true, removed rows slide up (only during polling)
+        let currentJobIds = new Set(); // Tracks job IDs currently rendered in the table
 
         // Helper functions
         function getStatusBadge(status, display) {
@@ -284,6 +286,7 @@
         function refreshTable() {
             if (jobsTable) {
                 suppressLoader = true; // Polling refresh: suppress loader to avoid visual noise
+                enableSlideAnimation = true; // Polling refresh: enable slide-up for removed rows
 
                 // Preserve scroll position so polling does not jump the viewport
                 const scrollY = window.scrollY;
@@ -344,12 +347,52 @@
                         .then(r => r.json())
                         .then(response => {
                             if (loader) { loader.style.opacity = '0'; loader.style.visibility = 'hidden'; }
-                            callback({
-                                draw: dtData.draw,
-                                data: response.results,
-                                recordsTotal: response.count,
-                                recordsFiltered: response.count,
-                            });
+
+                            const newJobIds = new Set(response.results.map(j => j.id));
+                            const removedIds = [...currentJobIds].filter(id => !newJobIds.has(id));
+
+                            // Find DOM rows that are about to be removed and animate them out.
+                            // Only during polling (enableSlideAnimation=true) — skip for pagination,
+                            // filter, and search reloads to avoid unintended animations.
+                            const rowsToAnimate = [];
+                            if (enableSlideAnimation && removedIds.length > 0 && jobsTable) {
+                                jobsTable.rows().every(function() {
+                                    if (removedIds.includes(this.data().id)) {
+                                        rowsToAnimate.push(this.node());
+                                    }
+                                });
+                            }
+
+                            const doCallback = () => {
+                                currentJobIds = newJobIds;
+                                enableSlideAnimation = false; // Reset for next request
+                                callback({
+                                    draw: dtData.draw,
+                                    data: response.results,
+                                    recordsTotal: response.count,
+                                    recordsFiltered: response.count,
+                                });
+                            };
+
+                            if (rowsToAnimate.length > 0) {
+                                rowsToAnimate.forEach(row => {
+                                    row.style.overflow = 'hidden';
+                                    row.style.height = row.offsetHeight + 'px';
+                                    row.style.opacity = '1';
+                                    requestAnimationFrame(() => {
+                                        requestAnimationFrame(() => {
+                                            row.style.transition = 'height 0.6s ease, opacity 0.6s ease, padding 0.6s ease';
+                                            row.style.height = '0';
+                                            row.style.opacity = '0';
+                                            row.style.paddingTop = '0';
+                                            row.style.paddingBottom = '0';
+                                        });
+                                    });
+                                });
+                                setTimeout(doCallback, 700);
+                            } else {
+                                doCallback();
+                            }
                         })
                         .catch(error => {
                             console.error('Error loading jobs:', error);
@@ -516,6 +559,8 @@
                     }
                 ],
                 createdRow: function(row, data, dataIndex) {
+                    // Track rendered job IDs so the ajax handler can detect removed rows
+                    currentJobIds.add(data.id);
                     // Mute retired/retiring job rows by dimming all cells except the Actions column.
                     // Applying opacity to the tr itself would affect buttons too (CSS opacity is not
                     // overridable by children), so we target td cells individually instead.
