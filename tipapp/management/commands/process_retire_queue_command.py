@@ -232,11 +232,15 @@ def _retire_job(job, stdout=None):
         if stdout:
             stdout.write(f"  -> Job {job.id} ({flight_name}) RETIRE_FAILED.")
     else:
+        # Rename flight_name to free up the unique slot for future re-uploads.
+        # Format: FireFlight_20231214_093139.RETIRED_20260313_143022
+        retired_flight_name = f"{flight_name}.RETIRED_{now.strftime('%Y%m%d_%H%M%S')}"
+        job.flight_name = retired_flight_name
         job.status = 'RETIRED'
         job.retired_at = now
         job.current_step = 'Retired'
-        job.save(update_fields=['status', 'retired_at', 'current_step', 'updated_at'])
-        logger.info(f"process_retire_queue: job {job.id} ({flight_name}) RETIRED successfully.")
+        job.save(update_fields=['flight_name', 'status', 'retired_at', 'current_step', 'updated_at'])
+        logger.info(f"process_retire_queue: job {job.id} ({flight_name}) RETIRED successfully. flight_name renamed to '{retired_flight_name}'.")
         if stdout:
             stdout.write(f"  -> Job {job.id} ({flight_name}) RETIRED.")
 
