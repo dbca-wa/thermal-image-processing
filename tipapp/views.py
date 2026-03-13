@@ -193,71 +193,76 @@ def list_uploads_history_contents(request, *args, **kwargs):
 @permission_classes([IsInAdministratorsGroup])
 def api_upload_thermal_files(request, *args, **kwargs):
     if request.FILES:
-        # uploaded_files = []  # Multiple files might be uploaded
+        from tipapp.models import ThermalProcessingJob
+        from django.db import transaction, IntegrityError
+        import re
+
         allowed_extensions = ['.zip', '.7z', '.pdf']
         uploaded_file = request.FILES.getlist('file')[0]
         newFileName = request.POST.get('newFileName', '')
 
         logger.info(f'File: [{uploaded_file.name}] is being uploaded...')
 
-        # Check file extensions
+        # Phase 1: Check file extension
         _, file_extension = os.path.splitext(uploaded_file.name)
         if file_extension.lower() not in allowed_extensions:
             return JsonResponse({'error': 'Invalid file type. Only .zip and .7z files are allowed.'}, status=400)
 
-        # Save files
-        save_path = os.path.join(settings.PENDING_IMPORT_PATH,  newFileName)
-        with open(save_path, 'wb+') as destination:
-            for chunk in uploaded_file.chunks():
-                destination.write(chunk)
-        logger.info(f"File: [{uploaded_file.name}] has been successfully saved at [{save_path}].")
-        
-        # Phase 2: Create job record for tracking
-        from tipapp.models import ThermalProcessingJob
-        
-        # Extract flight name from filename (remove extensions and timestamp)
+        # Phase 2: Extract flight name.
         # Example: FireFlight_20211203_052327.20260213_155626.7z -> FireFlight_20211203_052327
         flight_name = newFileName
-        # Remove .7z or .zip extension
         if flight_name.lower().endswith('.7z'):
             flight_name = flight_name[:-3]
         elif flight_name.lower().endswith('.zip'):
             flight_name = flight_name[:-4]
-        # Remove timestamp if present (format: .YYYYMMDD_HHMMSS)
-        import re
+        # Remove upload timestamp suffix (format: .YYYYMMDD_HHMMSS)
         flight_name = re.sub(r'\.\d{8}_\d{6}$', '', flight_name)
-        
-        # Check for duplicate flight_name and add suffix if necessary
-        base_flight_name = flight_name
-        counter = 1
-        while ThermalProcessingJob.objects.filter(flight_name=flight_name).exists():
-            counter += 1
-            flight_name = f"{base_flight_name}_{counter}"
-        
-        if counter > 1:
-            logger.info(f"Duplicate flight name detected. Using '{flight_name}' instead of '{base_flight_name}'")
-        
+
+        # Phase 3: Save file and create job record atomically.
+        # The duplicate check and INSERT are wrapped in a transaction so that
+        # concurrent uploads of the same flight_name cannot both pass the check.
+        # If a race condition causes an IntegrityError (unique constraint on
+        # flight_name), the file is removed and a 409 is returned — no orphan.
+        save_path = os.path.join(settings.PENDING_IMPORT_PATH, newFileName)
         try:
-            # Get file size
-            file_size = os.path.getsize(save_path)
-            
-            # Create job record
-            job = ThermalProcessingJob.objects.create(
-                flight_name=flight_name,
-                original_filename=uploaded_file.name,
-                status='QUEUED',  # File is in pending_imports, ready for processing
-                file_size=file_size,
-                file_path=save_path,
-                uploaded_by=request.user if request.user.is_authenticated else None,
-                uploaded_by_email=request.user.email if hasattr(request.user, 'email') else '',
+            with transaction.atomic():
+                if ThermalProcessingJob.objects.filter(flight_name=flight_name).exists():
+                    logger.warning(f"Upload rejected: flight '{flight_name}' already exists.")
+                    return JsonResponse(
+                        {'error': f"Flight '{flight_name}' already exists. Please retire the existing data before re-uploading."},
+                        status=409,
+                    )
+
+                # Write file inside the transaction so a DB failure can trigger cleanup.
+                with open(save_path, 'wb+') as destination:
+                    for chunk in uploaded_file.chunks():
+                        destination.write(chunk)
+                logger.info(f"File: [{uploaded_file.name}] has been successfully saved at [{save_path}].")
+
+                file_size = os.path.getsize(save_path)
+                job = ThermalProcessingJob.objects.create(
+                    flight_name=flight_name,
+                    original_filename=uploaded_file.name,
+                    status='QUEUED',  # File is in pending_imports, ready for processing
+                    file_size=file_size,
+                    file_path=save_path,
+                    uploaded_by=request.user if request.user.is_authenticated else None,
+                    uploaded_by_email=request.user.email if hasattr(request.user, 'email') else '',
+                )
+                logger.info(f"Job record created: ID={job.id}, Flight={flight_name}, Status={job.status}")
+
+        except IntegrityError:
+            # Concurrent upload slipped through: remove the orphaned file.
+            if os.path.exists(save_path):
+                os.remove(save_path)
+                logger.warning(f"Removed orphaned file '{save_path}' after IntegrityError for flight '{flight_name}'.")
+            return JsonResponse(
+                {'error': f"Flight '{flight_name}' already exists. Please retire the existing data before re-uploading."},
+                status=409,
             )
-            logger.info(f"Job record created: ID={job.id}, Flight={flight_name}, Status={job.status}")
-        except Exception as e:
-            # Log error but don't fail the upload
-            logger.error(f"Failed to create job record for {flight_name}: {e}", exc_info=True)
-        
+
         file_info = get_file_record(settings.PENDING_IMPORT_PATH, newFileName)
-        return JsonResponse({'message': 'File(s) uploaded successfully.', 'data' : file_info})
+        return JsonResponse({'message': 'File(s) uploaded successfully.', 'data': file_info})
     else:
         logger.info(f"No file(s) were uploaded.")
         return JsonResponse({'error': 'No file(s) were uploaded.'}, status=400)
@@ -656,12 +661,14 @@ def reset_stuck_job(request, job_id, *args, **kwargs):
 @permission_classes([IsInAdministratorsGroup])
 def retire_job(request, job_id, *args, **kwargs):
     """
-    Queue a completed thermal processing job for retirement.
+    Queue a thermal processing job for retirement.
 
     Sets the job status to RETIRE_QUEUED so the process_retire_queue
     cron job can pick it up and perform the heavy work asynchronously.
 
-    Only COMPLETED jobs can be queued for retirement.
+    Retirable statuses: COMPLETED, RETIRE_FAILED, FAILED, QUEUED, UPLOADED.
+    Jobs that are actively running (PROCESSING, RETIRING, RETIRE_QUEUED)
+    cannot be retired until they finish.
     """
     from tipapp.models import ThermalProcessingJob
 
@@ -670,9 +677,10 @@ def retire_job(request, job_id, *args, **kwargs):
     except ThermalProcessingJob.DoesNotExist:
         return JsonResponse({'error': 'Job not found'}, status=404)
 
-    if job.status not in ('COMPLETED', 'RETIRE_FAILED'):
+    RETIRABLE_STATUSES = ('COMPLETED', 'RETIRE_FAILED', 'FAILED', 'QUEUED', 'UPLOADED')
+    if job.status not in RETIRABLE_STATUSES:
         return JsonResponse(
-            {'error': f"Only COMPLETED or RETIRE_FAILED jobs can be queued for retirement (current status: {job.status})."},
+            {'error': f"Cannot retire a job with status '{job.status}'. Only {', '.join(RETIRABLE_STATUSES)} jobs can be queued for retirement."},
             status=400,
         )
 
