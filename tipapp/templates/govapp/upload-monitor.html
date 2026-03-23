@@ -210,6 +210,7 @@
                             <p><strong>Completed:</strong> ${formatDateTime(job.processing_completed_at)}</p>
                             <p><strong>Duration:</strong> ${formatDuration(job.duration_seconds)}</p>
                             ${job.retired_at ? `<p><strong>Retired:</strong> ${formatDateTime(job.retired_at)}</p>` : ''}
+                            ${job.retired_by_email ? `<p><strong>Retired by:</strong> ${job.retired_by_email}</p>` : ''}
                         </div>
                     </div>
                     <hr>
