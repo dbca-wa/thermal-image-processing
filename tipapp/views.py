@@ -540,6 +540,7 @@ def list_processing_jobs(request, *args, **kwargs):
             'districts_covered': job.districts_covered,
             'error_message': job.error_message if job.status == 'FAILED' else None,
             'retired_at': job.retired_at.isoformat() if job.retired_at else None,
+            'retired_by_email': job.retired_by_email or None,
         })
     
     return JsonResponse({
@@ -615,6 +616,7 @@ def get_job_status(request, job_id, *args, **kwargs):
         'is_failed': job.is_failed(),
         'is_retired': job.is_retired(),
         'retired_at': job.retired_at.isoformat() if job.retired_at else None,
+        'retired_by_email': job.retired_by_email or None,
     }
     
     return JsonResponse(response_data)
@@ -684,11 +686,16 @@ def retire_job(request, job_id, *args, **kwargs):
             status=400,
         )
 
+    retiring_user = request.user
+    retiring_email = retiring_user.email if hasattr(retiring_user, 'email') else ''
+
     job.status = 'RETIRE_QUEUED'
-    job.current_step = f"Retire queued by {request.user.email if hasattr(request.user, 'email') else request.user}"
+    job.current_step = f"Retire queued by {retiring_email or retiring_user}"
     job.error_message = ''
-    job.save(update_fields=['status', 'current_step', 'error_message', 'updated_at'])
-    logger.info(f"Job {job.id} ({job.flight_name}) queued for retirement by {request.user}.")
+    job.retired_by = retiring_user if retiring_user.is_authenticated else None
+    job.retired_by_email = retiring_email
+    job.save(update_fields=['status', 'current_step', 'error_message', 'retired_by', 'retired_by_email', 'updated_at'])
+    logger.info(f"Job {job.id} ({job.flight_name}) queued for retirement by {retiring_user}.")
 
     return JsonResponse({
         'message': f"Job {job.id} ({job.flight_name}) has been queued for retirement.",
