@@ -117,7 +117,21 @@ class ThermalProcessingJob(models.Model):
         blank=True,
         help_text="When the job was retired (folder renamed, GeoServer and PostGIS data removed)"
     )
-    
+
+    retired_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='retired_thermal_processing_jobs',
+        help_text="User who initiated the retirement of this job"
+    )
+
+    retired_by_email = models.EmailField(
+        blank=True,
+        help_text="Email address of the user who retired this job (preserved even if user deleted)"
+    )
+
     # Processing results
     output_geopackage_path = models.CharField(
         max_length=500, 
