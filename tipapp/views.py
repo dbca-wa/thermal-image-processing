@@ -540,6 +540,7 @@ def list_processing_jobs(request, *args, **kwargs):
             'districts_covered': job.districts_covered,
             'error_message': job.error_message if job.status == 'FAILED' else None,
             'retired_at': job.retired_at.isoformat() if job.retired_at else None,
+            'retired_by_email': job.retired_by_email or None,
         })
     
     return JsonResponse({
@@ -615,6 +616,7 @@ def get_job_status(request, job_id, *args, **kwargs):
         'is_failed': job.is_failed(),
         'is_retired': job.is_retired(),
         'retired_at': job.retired_at.isoformat() if job.retired_at else None,
+        'retired_by_email': job.retired_by_email or None,
     }
     
     return JsonResponse(response_data)
