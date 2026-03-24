@@ -1,4 +1,14 @@
-{% extends 'govapp/base.html' %} 
+{% extends 'govapp/base.html' %}
+
+{% block extra_style %}
+{{ block.super }}
+<link href="/static/common/css/fixedColumns.dataTables.min.css" rel="stylesheet" />
+{% endblock %}
+
+{% block extra_js %}
+{{ block.super }}
+<script src="/static/common/js/dataTables.fixedColumns.min.js"></script>
+{% endblock %}
 
 {% block content %}
 {% if request.user.is_authenticated is True and has_view_permission is True %}
@@ -73,7 +83,7 @@
                 </div>
 
                 <!-- Jobs Table -->
-                <div class="table-responsive">
+                <div>
                     <table id="jobs-table" class="table table-striped table-hover" style="width:100%">
                         <thead>
                             <tr>
@@ -574,7 +584,8 @@
                     // Applying opacity to the tr itself would affect buttons too (CSS opacity is not
                     // overridable by children), so we target td cells individually instead.
                     if (['RETIRED', 'RETIRE_QUEUED', 'RETIRING'].includes(data.status)) {
-                        $(row).find('td:not(:last-child)').css('opacity', '0.55');
+                        // Dim all cells except the sticky ID (first) and Actions (last) columns
+                        $(row).find('td:not(:first-child):not(:last-child)').css('opacity', '0.55');
                     }
                 },
                 order: [[7, 'desc']], // Sort by Created descending (newest first)
@@ -592,7 +603,11 @@
                 dom: '<"row"<"col-sm-12 col-md-6"l><"col-sm-12 col-md-6"f>>' +
                      '<"row"<"col-sm-12"tr>>' +
                      '<"row"<"col-sm-12 col-md-5"i><"col-sm-12 col-md-7"p>>',
-                responsive: true
+                scrollX: true,
+                fixedColumns: {
+                    left: 1,
+                    right: 1
+                }
             });
 
             // Setup status filter: reload via server-side API (not client-side column search)
