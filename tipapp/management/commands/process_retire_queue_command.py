@@ -89,7 +89,14 @@ def _retire_job(job, stdout=None):
 
     if os.path.exists(original_folder):
         try:
-            shutil.move(original_folder, retired_dest)
+            try:
+                os.rename(original_folder, retired_dest)
+            except OSError:
+                # Cross-filesystem move: copy contents then remove source.
+                # Use copyfile as copy_function to avoid utime permission errors
+                # on restricted storage mounts (e.g. Azure Container rclone mounts).
+                shutil.copytree(original_folder, retired_dest, copy_function=shutil.copyfile)
+                shutil.rmtree(original_folder)
             logger.info(f"Retired folder moved: {original_folder} -> {retired_dest}")
         except Exception as e:
             error_msg = f"Failed to move folder to retired archive: {e}"
