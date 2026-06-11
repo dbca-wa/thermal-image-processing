@@ -621,7 +621,7 @@ def unzip_and_prepare(full_filename_path, target_dirname=None):
 
     # 1. Copy file to processing folder
     logger.info(f"Copying {full_filename_path} to {target_7z_path}")
-    shutil.copy2(full_filename_path, target_7z_path)
+    shutil.copyfile(full_filename_path, target_7z_path)
 
     # 2. Move original file to uploads history folder
     # Ensure uploads_folder_path is absolute
