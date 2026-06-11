@@ -63,6 +63,8 @@ COPY --chown=oim:oim tipapp tipapp
 COPY --chown=oim:oim thermalimageprocessing thermalimageprocessing
 COPY --chown=oim:oim manage.py ./
 
+RUN python manage.py collectstatic --noinput
+
 # Install the project (ensure that frontend projects have been built prior to this step).
 FROM python_libs_thermal_processing
 COPY timezone /etc/timezone
