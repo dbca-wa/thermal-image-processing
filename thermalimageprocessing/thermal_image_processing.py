@@ -633,8 +633,9 @@ def unzip_and_prepare(full_filename_path, target_dirname=None):
 
     if not os.path.exists(settings.UPLOADS_HISTORY_PATH):
          os.makedirs(settings.UPLOADS_HISTORY_PATH, exist_ok=True)
-         
-    shutil.move(full_filename_path, dest_move_path)
+
+    shutil.copyfile(full_filename_path, dest_move_path)
+    os.unlink(full_filename_path)
 
     # 3. Determine the actual directory name inside the 7z archive
     # Use 7z list command to get the root directory name
@@ -705,7 +706,7 @@ def unzip_and_prepare(full_filename_path, target_dirname=None):
             # Remove target if it already exists (shouldn't happen, but be safe)
             logger.warning(f"Target directory {target_path} already exists, removing it")
             shutil.rmtree(target_path)
-        shutil.move(extracted_path, target_path)
+        os.rename(extracted_path, target_path)
     
     # Return the full path to the extracted directory
     return target_path

@@ -157,7 +157,8 @@ class ImportsProcessor():
                             if not os.path.exists(settings.UPLOADS_HISTORY_PATH):
                                 os.makedirs(settings.UPLOADS_HISTORY_PATH, exist_ok=True)
                             dest = os.path.join(settings.UPLOADS_HISTORY_PATH, filename)
-                            shutil.move(entry.path, dest)
+                            shutil.copyfile(entry.path, dest)
+                            os.unlink(entry.path)
                             logger.info(f"Invalid archive moved to archives: {dest}")
                         except Exception as move_err:
                             logger.error(f"Could not move invalid archive to archives: {move_err}")
