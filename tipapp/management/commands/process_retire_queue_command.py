@@ -55,6 +55,25 @@ def _process_retire_queue(stdout=None):
         _retire_job(job, stdout)
 
 
+def _copy_tree_files_only(src, dst):
+    """
+    Recursively copy a directory tree from src to dst, copying only file data.
+
+    Unlike shutil.copytree, this does NOT call shutil.copystat on directories,
+    which prevents [Errno 1] Operation not permitted errors on restricted storage
+    mounts (e.g., Azure Container rclone mounts) that do not support setting
+    directory timestamps or permissions.
+    """
+    os.makedirs(dst, exist_ok=True)
+    for name in os.listdir(src):
+        s = os.path.join(src, name)
+        d = os.path.join(dst, name)
+        if os.path.isdir(s):
+            _copy_tree_files_only(s, d)
+        else:
+            shutil.copyfile(s, d)
+
+
 def _retire_job(job, stdout=None):
     """Perform the full retire sequence for a single job."""
     flight_name = job.flight_name
@@ -93,9 +112,10 @@ def _retire_job(job, stdout=None):
                 os.rename(original_folder, retired_dest)
             except OSError:
                 # Cross-filesystem move: copy contents then remove source.
-                # Use copyfile as copy_function to avoid utime permission errors
-                # on restricted storage mounts (e.g. Azure Container rclone mounts).
-                shutil.copytree(original_folder, retired_dest, copy_function=shutil.copyfile)
+                # _copy_tree_files_only avoids calling shutil.copystat on directories,
+                # which fails with EPERM on restricted storage mounts (e.g. Azure
+                # Container rclone mounts) that do not permit setting directory metadata.
+                _copy_tree_files_only(original_folder, retired_dest)
                 shutil.rmtree(original_folder)
             logger.info(f"Retired folder moved: {original_folder} -> {retired_dest}")
         except Exception as e:
@@ -162,6 +182,14 @@ def _retire_job(job, stdout=None):
                         f"GeoServer store deleted (or not found): {store_name} "
                         f"(status {del_response.status_code})"
                     )
+                elif del_response.status_code == 405:
+                    # 405 Method Not Allowed: the store does not exist under this name
+                    # or a proxy is blocking the DELETE method. Either way there is
+                    # nothing to clean up — log a warning and continue.
+                    logger.warning(
+                        f"GeoServer DELETE returned 405 for store '{store_name}'. "
+                        "The store may not exist or DELETE is blocked by a proxy. Skipping."
+                    )
                 else:
                     error_msg = (
                         f"Failed to delete GeoServer store '{store_name}': "
@@ -216,15 +244,24 @@ def _retire_job(job, stdout=None):
             engine = create_engine(postgis_url)
             with engine.connect() as conn:
                 for table in ['hotspot_flight_footprints', 'hotspot_boundaries', 'hotspot_centroids']:
-                    result = conn.execute(
-                        text(f"DELETE FROM {table} WHERE flight_datetime = :ts"),
-                        {"ts": flight_timestamp},
-                    )
-                    conn.commit()
-                    logger.info(
-                        f"Deleted {result.rowcount} rows from {table} "
-                        f"for flight_datetime={flight_timestamp}"
-                    )
+                    try:
+                        result = conn.execute(
+                            text(f"DELETE FROM {table} WHERE flight_datetime = :ts"),
+                            {"ts": flight_timestamp},
+                        )
+                        conn.commit()
+                        logger.info(
+                            f"Deleted {result.rowcount} rows from {table} "
+                            f"for flight_datetime={flight_timestamp}"
+                        )
+                    except Exception as table_err:
+                        conn.rollback()
+                        # A missing table means there is no data to remove — log a
+                        # warning and continue rather than aborting the whole step.
+                        logger.warning(
+                            f"Could not delete from PostGIS table '{table}' "
+                            f"(table may not exist): {table_err}"
+                        )
         except Exception as e:
             error_msg = f"PostGIS deletion error: {e}"
             logger.error(error_msg, exc_info=True)
