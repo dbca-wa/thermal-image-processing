@@ -2,6 +2,7 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 import sys
 import requests
 import time
@@ -836,7 +837,29 @@ def run_thermal_processing(flight_path_arg, job_id=None):
 
         if not os.path.exists(output_folder):
             os.makedirs(output_folder)
-        
+
+        # GeoPackage files are written to a local temp path during processing.
+        # Azure Files (SMB) mounts do not support the SQLite file-locking
+        # mechanism that pyogrio/GDAL requires, which causes
+        # "Failed to start transaction" errors when writing directly to the
+        # network share.  All read/write operations use the local path; the
+        # finished file is copied to the final network destination once
+        # processing is complete.
+        local_geopackage = os.path.join(
+            tempfile.gettempdir(), flight_name + "_output.gpkg"
+        )
+        # Remove any leftover temp file from a previous failed run.
+        for stale in [
+            local_geopackage,
+            local_geopackage + "-wal",
+            local_geopackage + "-shm",
+            local_geopackage + "-journal",
+        ]:
+            if os.path.exists(stale):
+                os.remove(stale)
+                logger.info(f"Removed stale local GeoPackage file: {stale}")
+        logger.info(f"GeoPackage will be built locally at: {local_geopackage}")
+
         all_images_with_hotspots = []
         mosaic_stored_ok = False
 
@@ -870,7 +893,7 @@ def run_thermal_processing(flight_path_arg, job_id=None):
         logger.info(">>> Step 3/8: Creating Footprint and pushing to PostGIS...")
         # Phase 4: Update progress
         update_job_progress('Creating footprint', 50)
-        create_mosaic_footprint_as_line(files, raw_img_folder, flight_timestamp, mosaic_image, engine, footprint, output_geopackage)
+        create_mosaic_footprint_as_line(files, raw_img_folder, flight_timestamp, mosaic_image, engine, footprint, local_geopackage)
         msg += "\nFootprint produced and pushed to PostGIS OK"
         logger.info('Footprint produced and pushed to PostGIS OK') 
 
@@ -880,7 +903,7 @@ def run_thermal_processing(flight_path_arg, job_id=None):
 
         # --- Log: District Check ---
         logger.info(">>> Step 4/8: Checking Districts...")
-        get_footprint_districts(footprint, output_geopackage)
+        get_footprint_districts(footprint, local_geopackage)
         msg += "\nFootprint lies in district(s) " + str(footprint.districts)
         logger.info("Footprint lies in district(s) " + str(footprint.districts))
 
@@ -894,7 +917,7 @@ def run_thermal_processing(flight_path_arg, job_id=None):
         logger.info(">>> Step 6/8: Analyzing Hotspots (Intersects)...")
         # Phase 4: Update progress
         update_job_progress('Analyzing hotspots and creating boundaries', 60)
-        all_images_with_hotspots = create_boundaries_and_centroids(flight_timestamp, kml_boundaries_file, bboxes, engine, output_geopackage)
+        all_images_with_hotspots = create_boundaries_and_centroids(flight_timestamp, kml_boundaries_file, bboxes, engine, local_geopackage)
         if not all_images_with_hotspots:
             msg += "\nNO HOTSPOTS FOUND!!!"
             logger.info("NO HOTSPOTS FOUND!!!")
@@ -946,6 +969,23 @@ def run_thermal_processing(flight_path_arg, job_id=None):
             msg += f"\nPublished {len(all_images_with_hotspots)} individual hotspot images to geoserver OK."
             logger.info(f"Published {len(all_images_with_hotspots)} individual hotspot images to geoserver OK.")
         
+        # Copy the finished GeoPackage from local temp storage to the final
+        # network path now that all SQLite writes are complete.
+        # shutil.copyfile is used deliberately: it copies only raw file bytes and
+        # does not attempt to preserve timestamps or extended attributes, which
+        # can fail on Azure Files (SMB) mounts with a permission error.
+        if os.path.exists(local_geopackage):
+            shutil.copyfile(local_geopackage, output_geopackage)
+            logger.info(f"GeoPackage copied to final destination: {output_geopackage}")
+            for stale in [
+                local_geopackage,
+                local_geopackage + "-wal",
+                local_geopackage + "-shm",
+                local_geopackage + "-journal",
+            ]:
+                if os.path.exists(stale):
+                    os.remove(stale)
+
         # Phase 4: Update progress to near completion
         update_job_progress('Finalizing processing', 95)
 
