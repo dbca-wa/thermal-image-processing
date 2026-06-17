@@ -1,4 +1,4 @@
-# GeoServer Configuration Requirements
+# Hotspots Geoserver
 
 This document describes the GeoServer objects that must be pre-configured for the Thermal Image Processing system to function correctly.
 
@@ -13,7 +13,7 @@ GeoServer is accessed at the following URLs depending on the environment:
 | Environment | GeoServer URL |
 | :--- | :--- |
 | **Development** | `https://<dev-url>/geoserver/` |
-| **UAT** | `https://<uat-url>/geoserver/` |
+| **UAT** | `https://hotspots-uat.dbca.wa.gov.au/geoserver/` |
 | **Production** | `https://hotspots.dbca.wa.gov.au/geoserver/` |
 
 ---

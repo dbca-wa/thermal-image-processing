@@ -1,6 +1,8 @@
 [[_TOC_]]
 
-# Overview
+# Thermal Imaging (Hotspots)
+
+## Overview
 
 Thermal Image Processing is a Django-based system that ingests thermal flight archives (`.7z`/`.zip`), processes imagery into geospatial outputs, and publishes derived data for downstream mapping and operational use.
 
@@ -259,9 +261,7 @@ Notes:
 
 # GeoServer and Spatial Requirements
 
-GeoServer prerequisites and layer/style setup are documented in:
-
-- `docs/geoserver-configuration.md`
+GeoServer prerequisites and layer/style setup are documented in the [Hotspots Geoserver](Hotspots-Geoserver) subpage.
 
 Minimum assumptions used by this system:
 
