@@ -204,7 +204,7 @@ def copy_to_geoserver_storage(source_file, relative_dest_path):
             raise FileNotFoundError(error_msg)
         
         # Define the target base path
-        mount_base_path = "/rclone-mounts/thermalimaging-flightmosaics"
+        mount_base_path = settings.GEOSERVER_STORAGE_PATH
         
         # Construct the full destination path
         # relative_dest_path format: 'FlightName.tif' or 'FlightName_images/xxx.tif'
@@ -417,7 +417,7 @@ def publish_image_on_geoserver(flight_name, image_name=None):
 
     flight_timestamp = flight_name.replace("FireFlight_", "")
     headers = {'Content-type': 'application/xml'}
-    file_url_base = os.environ.get('general_file_url_base', 'file:///rclone-mounts/thermalimaging-flightmosaics/')
+    file_url_base = settings.GEOSERVER_FILE_URL_BASE
     gs_url_base = os.environ.get('general_gs_url_base','https://hotspots.dbca.wa.gov.au/geoserver/rest/workspaces/hotspots/coveragestores/')
 
     logger.info(f'gs_url_base: {gs_url_base}')

@@ -347,6 +347,12 @@ DATA_STORAGE = decouple.config("DATA_STORAGE", default=os.path.join(BASE_DIR, DA
 RETIRED_STORAGE = decouple.config("RETIRED_STORAGE", default=os.path.join(DATA_STORAGE, "retired"))
 DOWNLOADS_PATH = decouple.config("DOWNLOADS_PATH", default=os.path.join(BASE_DIR, DOWNLOADS_FOLDER_NAME))
 UPLOADS_HISTORY_PATH = decouple.config("UPLOADS_HISTORY_PATH", default=os.path.join(BASE_DIR, UPLOADS_HISTORY_FOLDER_NAME))
+GEOSERVER_FILE_URL_BASE = decouple.config(
+    "general_file_url_base",
+    default="file:///rclone-mounts/thermalimaging-flightmosaics/",
+)
+# Derive the local filesystem mount path by stripping the 'file://' URL scheme
+GEOSERVER_STORAGE_PATH = GEOSERVER_FILE_URL_BASE.replace("file://", "").rstrip("/")
 
 for dir_path in [PENDING_IMPORT_PATH, DATA_STORAGE, RETIRED_STORAGE, DOWNLOADS_PATH, UPLOADS_HISTORY_PATH]:
     if not os.path.exists(dir_path):

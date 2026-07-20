@@ -210,7 +210,7 @@ def _retire_job(job, stdout=None):
     job.current_step = 'Retiring: removing GeoServer storage files'
     job.save(update_fields=['current_step', 'updated_at'])
 
-    gs_storage_base = "/rclone-mounts/thermalimaging-flightmosaics"
+    gs_storage_base = settings.GEOSERVER_STORAGE_PATH
     mosaic_tif = os.path.join(gs_storage_base, f"{flight_name}.tif")
     images_dir = os.path.join(gs_storage_base, f"{flight_name}_images")
 
