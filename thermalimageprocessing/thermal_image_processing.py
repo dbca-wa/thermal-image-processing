@@ -44,25 +44,19 @@ gdal.SetConfigOption('OGR_GEOMETRY_ACCEPT_UNCLOSED_RING', 'YES')
 input_image_file_ext = ".png"
 output_image_file_ext = ".tif"
 
-raw_url = decouple.config("general_postgis_table", default="NO DATABASE URL FOUND FOR THERMAL IMAGE PROCESSING.")
+raw_url = settings.POSTGIS_DATABASE_URL
 if raw_url:
     # SQLAlchemy requires 'postgresql://' protocol, but Django often uses 'postgis://'.
     # Replace 'postgis://' with 'postgresql://' to avoid NoSuchModuleError.
     postgis_table = raw_url.replace('postgis://', 'postgresql://')
 else:
-    logger.error("ERROR: general_postgis_table environment variable is not set.")
+    logger.error("ERROR: POSTGIS_DATABASE_URL environment variable is not set.")
     sys.exit(1) 
 
 logger.debug(f'postgis_table: {postgis_table}')
-# azure_conn_string = os.environ.get('general_azure_conn_string') # config.get('general', 'azure_conn_string') 
-container_name = os.environ.get('general_container_name') # config.get('general', 'container_name')
-# blob_service_client = BlobServiceClient.from_connection_string(azure_conn_string)
-districts_dataset_name = os.environ.get('general_districts_dataset_name') # config.get('general', 'districts_dataset_name')
+districts_dataset_name = settings.DISTRICTS_GPKG_PATH
 # Resolve relative paths from BASE_DIR (project root), consistent with settings.DISTRICTS_GPKG_PATH
 districts_gpkg = os.path.join(settings.BASE_DIR, districts_dataset_name) if districts_dataset_name and not os.path.isabs(districts_dataset_name) else districts_dataset_name
-districts_layer_name = os.environ.get('general_districts_layer_name') #config.get('general', 'districts_layer_name')
-user = os.environ.get('geoserver_user') #config.get('geoserver', 'user')
-gs_pwd = os.environ.get('geoserver_password') #config.get('geoserver', 'gs_pwd')
 
 class Footprint:
     def __init__(self):
@@ -204,7 +198,7 @@ def copy_to_geoserver_storage(source_file, relative_dest_path):
             raise FileNotFoundError(error_msg)
         
         # Define the target base path
-        mount_base_path = "/rclone-mounts/thermalimaging-flightmosaics"
+        mount_base_path = settings.GEOSERVER_STORAGE_PATH
         
         # Construct the full destination path
         # relative_dest_path format: 'FlightName.tif' or 'FlightName_images/xxx.tif'
@@ -259,7 +253,7 @@ def create_mosaic_footprint_as_line(files, raw_img_folder, flight_timestamp, ima
     footprint_poly_layer.to_file(output_geopackage, layer='footprint', driver="GPKG")
 
 def get_footprint_districts(footprint, output_geopackage):
-    districts_gdf = gpd.read_file(districts_gpkg, layer=districts_layer_name)
+    districts_gdf = gpd.read_file(districts_gpkg, layer=settings.DISTRICTS_LAYER_NAME)
     footprint_gdf = gpd.read_file(output_geopackage, layer='footprint')
     for index, footprint_feature in footprint_gdf.iterrows():
         # Should only be one footprint in the layer
@@ -417,8 +411,8 @@ def publish_image_on_geoserver(flight_name, image_name=None):
 
     flight_timestamp = flight_name.replace("FireFlight_", "")
     headers = {'Content-type': 'application/xml'}
-    file_url_base = os.environ.get('general_file_url_base', 'file:///rclone-mounts/thermalimaging-flightmosaics/')
-    gs_url_base = os.environ.get('general_gs_url_base','https://hotspots.dbca.wa.gov.au/geoserver/rest/workspaces/hotspots/coveragestores/')
+    file_url_base = settings.GEOSERVER_FILE_URL_BASE
+    gs_url_base = settings.GEOSERVER_REST_BASE_URL
 
     logger.info(f'gs_url_base: {gs_url_base}')
 
@@ -435,7 +429,7 @@ def publish_image_on_geoserver(flight_name, image_name=None):
     
     # --- Create Coverage Store ---
     try:
-        response = requests.post(gs_url_base, headers=headers, data=store_data, auth=(user, gs_pwd))
+        response = requests.post(gs_url_base, headers=headers, data=store_data, auth=(settings.GEOSERVER_USERNAME, settings.GEOSERVER_PASSWORD))
         if response.status_code in [200, 201]:
             logger.info(f"Coverage Store created successfully. (Status {response.status_code})")
         elif response.status_code == 500 and "already exists" in response.text:
@@ -456,7 +450,7 @@ def publish_image_on_geoserver(flight_name, image_name=None):
 
     # --- Create/Publish Layer ---
     try:
-        response = requests.post(gs_layer_url, headers=headers, data=layer_data, auth=(user, gs_pwd))
+        response = requests.post(gs_layer_url, headers=headers, data=layer_data, auth=(settings.GEOSERVER_USERNAME, settings.GEOSERVER_PASSWORD))
 
         if response.status_code == 201:
             success_message = f'Great success! Layer published on GeoServer: {target_layer_name}.'

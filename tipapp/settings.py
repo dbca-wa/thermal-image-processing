@@ -335,18 +335,27 @@ DISTRICTS_KB_URL = decouple.config(
         "&outputFormat=application%2Fx-gpkg"
     ),
 )
-_districts_raw = decouple.config("general_districts_dataset_name", default=None)
+_districts_raw = os.environ.get('DISTRICTS_GPKG_PATH', os.environ.get('general_districts_dataset_name', None))
 # Resolve relative paths from BASE_DIR (project root)
 if _districts_raw and not os.path.isabs(_districts_raw):
     DISTRICTS_GPKG_PATH = str(BASE_DIR / _districts_raw)
 else:
     DISTRICTS_GPKG_PATH = _districts_raw
+DISTRICTS_LAYER_NAME = os.environ.get('DISTRICTS_LAYER_NAME', os.environ.get('general_districts_layer_name', 'CPT_DBCA_DISTRICTS'))
 
 PENDING_IMPORT_PATH = decouple.config("PENDING_IMPORT_PATH", default=os.path.join(BASE_DIR, PENDING_IMPORT_FOLDER_NAME))
 DATA_STORAGE = decouple.config("DATA_STORAGE", default=os.path.join(BASE_DIR, DATA_STORAGE_FOLDER_NAME))
 RETIRED_STORAGE = decouple.config("RETIRED_STORAGE", default=os.path.join(DATA_STORAGE, "retired"))
 DOWNLOADS_PATH = decouple.config("DOWNLOADS_PATH", default=os.path.join(BASE_DIR, DOWNLOADS_FOLDER_NAME))
 UPLOADS_HISTORY_PATH = decouple.config("UPLOADS_HISTORY_PATH", default=os.path.join(BASE_DIR, UPLOADS_HISTORY_FOLDER_NAME))
+GEOSERVER_FILE_URL_BASE = os.environ.get('GEOSERVER_FILE_URL_BASE', os.environ.get('general_file_url_base', "file:///rclone-mounts/thermalimaging-flightmosaics/"))
+# Derive the local filesystem mount path by stripping the 'file://' URL scheme
+GEOSERVER_STORAGE_PATH = GEOSERVER_FILE_URL_BASE.replace("file://", "").rstrip("/")
+GEOSERVER_REST_BASE_URL= os.environ.get('GEOSERVER_REST_BASE_URL', os.environ.get('general_gs_url_base', "GEOSERVER_REST_BASE_URL_NOT_CONFIGURED"))  # 'https://hotspots.dbca.wa.gov.au/geoserver/rest/workspaces/hotspots/coveragestores/'
+
+GEOSERVER_USERNAME = os.environ.get('GEOSERVER_USERNAME', os.environ.get('geoserver_user', 'GEOSERVER_USERNAME_NOT_CONFIGURED'))
+GEOSERVER_PASSWORD = os.environ.get('GEOSERVER_PASSWORD', os.environ.get('geoserver_password', 'GEOSERVER_PASSWORD_NOT_CONFIGURED'))
+POSTGIS_DATABASE_URL = os.environ.get('POSTGIS_DATABASE_URL', os.environ.get('general_postgis_table', 'POSTGIS_DATABASE_URL_NOT_CONFIGURED'))
 
 for dir_path in [PENDING_IMPORT_PATH, DATA_STORAGE, RETIRED_STORAGE, DOWNLOADS_PATH, UPLOADS_HISTORY_PATH]:
     if not os.path.exists(dir_path):

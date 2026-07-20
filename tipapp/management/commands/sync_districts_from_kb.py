@@ -4,7 +4,7 @@ Kaartdijin Boodja (KB) and replace the local copy used for district name lookups
 
 The download URL can be overridden via the environment variable
 `general_districts_kb_url`. The destination path is read from
-`general_districts_dataset_name`.
+`DISTRICTS_GPKG_PATH`.
 
 Intended to be run from cron, e.g. once daily.
 """
@@ -102,7 +102,7 @@ class SyncDistrictsFromKBCronJob(CronJobBase):
         dest_path = settings.DISTRICTS_GPKG_PATH
         if not dest_path:
             logger.error(
-                "general_districts_dataset_name is not set. "
+                "DISTRICTS_GPKG_PATH is not set. "
                 "Cannot determine destination path for district file."
             )
             return
@@ -118,7 +118,7 @@ class Command(base.BaseCommand):
 
         if not dest_path:
             msg = (
-                "general_districts_dataset_name is not set. "
+                "DISTRICTS_GPKG_PATH is not set. "
                 "Cannot determine destination path for district file."
             )
             logger.error(msg)

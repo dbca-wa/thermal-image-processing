@@ -133,20 +133,15 @@ def _retire_job(job, stdout=None):
     job.current_step = 'Retiring: removing GeoServer stores'
     job.save(update_fields=['current_step', 'updated_at'])
 
-    gs_user = os.environ.get('geoserver_user')
-    gs_pwd = os.environ.get('geoserver_password')
-    gs_url_base = os.environ.get(
-        'general_gs_url_base',
-        'https://hotspots.dbca.wa.gov.au/geoserver/rest/workspaces/hotspots/coveragestores/',
-    )
+    gs_url_base = settings.GEOSERVER_REST_BASE_URL
 
-    if gs_user and gs_pwd:
+    if settings.GEOSERVER_USERNAME and settings.GEOSERVER_PASSWORD:
         try:
             # List all coverage stores to find individual image stores for this flight
             list_response = http_requests.get(
                 gs_url_base,
                 headers={'Accept': 'application/json'},
-                auth=(gs_user, gs_pwd),
+                auth=(settings.GEOSERVER_USERNAME, settings.GEOSERVER_PASSWORD),
                 timeout=30,
             )
             stores_to_delete = []
@@ -174,7 +169,7 @@ def _retire_job(job, stdout=None):
                 delete_url = f"{gs_url_base}{store_name}.json?recurse=true"
                 del_response = http_requests.delete(
                     delete_url,
-                    auth=(gs_user, gs_pwd),
+                    auth=(settings.GEOSERVER_USERNAME, settings.GEOSERVER_PASSWORD),
                     timeout=30,
                 )
                 if del_response.status_code in [200, 404]:
@@ -210,7 +205,7 @@ def _retire_job(job, stdout=None):
     job.current_step = 'Retiring: removing GeoServer storage files'
     job.save(update_fields=['current_step', 'updated_at'])
 
-    gs_storage_base = "/rclone-mounts/thermalimaging-flightmosaics"
+    gs_storage_base = settings.GEOSERVER_STORAGE_PATH
     mosaic_tif = os.path.join(gs_storage_base, f"{flight_name}.tif")
     images_dir = os.path.join(gs_storage_base, f"{flight_name}_images")
 
@@ -237,7 +232,7 @@ def _retire_job(job, stdout=None):
     job.current_step = 'Retiring: removing PostGIS records'
     job.save(update_fields=['current_step', 'updated_at'])
 
-    raw_postgis_url = os.environ.get('general_postgis_table', '')
+    raw_postgis_url = settings.POSTGIS_DATABASE_URL
     if raw_postgis_url:
         postgis_url = raw_postgis_url.replace('postgis://', 'postgresql://')
         try:
@@ -267,7 +262,7 @@ def _retire_job(job, stdout=None):
             logger.error(error_msg, exc_info=True)
             errors.append(error_msg)
     else:
-        logger.warning("general_postgis_table not set; skipping PostGIS deletion.")
+        logger.warning("POSTGIS_DATABASE_URL not set; skipping PostGIS deletion.")
 
     # ------------------------------------------------------------------
     # Step 5: Finalise the job record
