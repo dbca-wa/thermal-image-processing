@@ -54,9 +54,6 @@ else:
     sys.exit(1) 
 
 logger.debug(f'postgis_table: {postgis_table}')
-# azure_conn_string = os.environ.get('general_azure_conn_string') # config.get('general', 'azure_conn_string') 
-container_name = os.environ.get('general_container_name') # config.get('general', 'container_name')
-# blob_service_client = BlobServiceClient.from_connection_string(azure_conn_string)
 districts_dataset_name = os.environ.get('general_districts_dataset_name') # config.get('general', 'districts_dataset_name')
 # Resolve relative paths from BASE_DIR (project root), consistent with settings.DISTRICTS_GPKG_PATH
 districts_gpkg = os.path.join(settings.BASE_DIR, districts_dataset_name) if districts_dataset_name and not os.path.isabs(districts_dataset_name) else districts_dataset_name
