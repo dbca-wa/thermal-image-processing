@@ -18,13 +18,14 @@ ENV FIELD_ENCRYPTION_KEY="Mv12YKHFm4WgTXMqvnoUUMZPpxx1ZnlFkfGzwactcdM="
 RUN apt-get clean
 RUN apt-get update
 RUN apt-get upgrade -y
-RUN apt-get install --no-install-recommends -y wget git libmagic-dev gcc binutils libproj-dev python3 python3-setuptools python3-dev python3-pip tzdata libreoffice cron python3-gunicorn
-RUN apt-get install --no-install-recommends -y libpq-dev patch virtualenv
-RUN apt-get install --no-install-recommends -y postgresql-client mtr 
-RUN apt-get install --no-install-recommends -y sqlite3 vim postgresql-client ssh htop iputils-ping python3-azure p7zip-full
-RUN apt-get install --no-install-recommends -y software-properties-common 
-RUN apt-get install --no-install-recommends -y gdal-bin python3-gdal
-RUN apt-get install --no-install-recommends -y libgdal-dev build-essential 
+# RUN apt-get install --no-install-recommends -y wget git libmagic-dev gcc binutils libproj-dev python3 python3-setuptools python3-dev python3-pip tzdata libreoffice cron python3-gunicorn
+# RUN apt-get install --no-install-recommends -y libpq-dev patch virtualenv
+# RUN apt-get install --no-install-recommends -y postgresql-client mtr 
+# RUN apt-get install --no-install-recommends -y sqlite3 vim postgresql-client ssh htop iputils-ping python3-azure p7zip-full
+# RUN apt-get install --no-install-recommends -y software-properties-common 
+# RUN apt-get install --no-install-recommends -y gdal-bin python3-gdal
+# RUN apt-get install --no-install-recommends -y libgdal-dev build-essential 
+RUN apt-get install --no-install-recommends -y p7zip-full
 
 # RUN ln -s /usr/bin/python3 /usr/bin/python 
 
@@ -50,14 +51,13 @@ RUN chmod 755 /startup.sh
 FROM builder_base_thermal_processing as python_libs_thermal_processing
 WORKDIR /app
 user oim 
-RUN virtualenv /app/venv
+RUN python -m venv /app/venv
 ENV PATH=/app/venv/bin:$PATH
 RUN git config --global --add safe.directory /app
 
 COPY requirements.txt ./
 COPY python-cron ./
-RUN pip install --upgrade pip 
-RUN /app/venv/bin/pip install --no-cache-dir -r requirements.txt 
+RUN pip install --no-cache-dir -r requirements.txt 
 
 COPY --chown=oim:oim tipapp tipapp
 COPY --chown=oim:oim thermalimageprocessing thermalimageprocessing
