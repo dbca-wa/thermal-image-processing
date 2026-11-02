@@ -51,7 +51,7 @@ RUN chmod 755 /startup.sh
 FROM builder_base_thermal_processing as python_libs_thermal_processing
 WORKDIR /app
 user oim 
-RUN python -m venv /app/venv
+RUN uv python -m venv /app/venv
 ENV PATH=/app/venv/bin:$PATH
 RUN git config --global --add safe.directory /app
 
