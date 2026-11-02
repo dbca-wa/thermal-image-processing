@@ -51,13 +51,13 @@ RUN chmod 755 /startup.sh
 FROM builder_base_thermal_processing as python_libs_thermal_processing
 WORKDIR /app
 user oim 
-RUN uv python -m venv /app/venv
+RUN python -m venv /app/venv
 ENV PATH=/app/venv/bin:$PATH
 RUN git config --global --add safe.directory /app
 
 COPY requirements.txt ./
 COPY python-cron ./
-RUN pip install --no-cache-dir -r requirements.txt 
+RUN uv pip install --no-cache-dir -r requirements.txt 
 
 COPY --chown=oim:oim tipapp tipapp
 COPY --chown=oim:oim thermalimageprocessing thermalimageprocessing
