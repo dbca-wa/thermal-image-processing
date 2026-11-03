@@ -27,6 +27,7 @@ from django.utils import timezone
 from django_cron import CronJobBase, Schedule
 from sqlalchemy import create_engine, text
 
+from thermalimageprocessing.file_utils import copy_tree_files_only
 from tipapp import settings
 
 logger = logging.getLogger(__name__)
@@ -53,25 +54,6 @@ def _process_retire_queue(stdout=None):
 
     for job in queued_jobs:
         _retire_job(job, stdout)
-
-
-def _copy_tree_files_only(src, dst):
-    """
-    Recursively copy a directory tree from src to dst, copying only file data.
-
-    Unlike shutil.copytree, this does NOT call shutil.copystat on directories,
-    which prevents [Errno 1] Operation not permitted errors on restricted storage
-    mounts (e.g., Azure Container rclone mounts) that do not support setting
-    directory timestamps or permissions.
-    """
-    os.makedirs(dst, exist_ok=True)
-    for name in os.listdir(src):
-        s = os.path.join(src, name)
-        d = os.path.join(dst, name)
-        if os.path.isdir(s):
-            _copy_tree_files_only(s, d)
-        else:
-            shutil.copyfile(s, d)
 
 
 def _retire_job(job, stdout=None):
@@ -112,10 +94,10 @@ def _retire_job(job, stdout=None):
                 os.rename(original_folder, retired_dest)
             except OSError:
                 # Cross-filesystem move: copy contents then remove source.
-                # _copy_tree_files_only avoids calling shutil.copystat on directories,
+                # copy_tree_files_only avoids calling shutil.copystat on directories,
                 # which fails with EPERM on restricted storage mounts (e.g. Azure
                 # Container rclone mounts) that do not permit setting directory metadata.
-                _copy_tree_files_only(original_folder, retired_dest)
+                copy_tree_files_only(original_folder, retired_dest)
                 shutil.rmtree(original_folder)
             logger.info(f"Retired folder moved: {original_folder} -> {retired_dest}")
         except Exception as e:
