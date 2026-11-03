@@ -23,6 +23,7 @@ git+https://github.com/dbca-wa/wagov_utils.git#egg=wagov_utils
 drf-spectacular>=0.24.2
 django-filter>=22.1
 python-dateutil>=2.8.2
+six>=1.17.0
 django-reversion>=5.0.4
 django-reversion-rest-framework>=1.1.2
 # django-cron>=0.6.0
