@@ -12,6 +12,7 @@ import django
 #import gdal
 from osgeo import gdal
 from thermalimageprocessing import gdal_edit
+from thermalimageprocessing.file_utils import copy_tree_files_only
 import fiona
 from osgeo import ogr
 import geopandas as gpd
@@ -673,36 +674,47 @@ def unzip_and_prepare(full_filename_path, target_dirname=None):
             extracted_dirname = os.path.splitext(basename_without_ext)[0]
         logger.info(f"Using fallback directory name: {extracted_dirname}")
     
-    # 4. Unzip using 7z
+    # 4. Unzip using 7z into a local temporary folder.
+    # 7z cannot set file attributes on the processing folder mount (Azure Files)
+    # and fails with errno=1, so extract locally and copy only the file data.
     logger.info(f"Uncompressing {filename}...")
+    local_extract_folder = tempfile.mkdtemp(prefix="tip_extract_")
     try:
-        # -aoa: Overwrite All existing files without prompt
-        subprocess.run(
-            ['7z', 'x', target_7z_path, '-aoa'],
-            cwd=processing_base_folder, # Execute inside thermal_data_processing
-            check=True,
-            capture_output=True
-        )
-    except subprocess.CalledProcessError as e:
-        logger.error(f"7z extraction failed: {e.stderr.decode()}")
-        raise
+        try:
+            # -aoa: Overwrite All existing files without prompt
+            subprocess.run(
+                ['7z', 'x', target_7z_path, '-aoa'],
+                cwd=local_extract_folder, # Execute inside the local temporary folder
+                check=True,
+                capture_output=True
+            )
+        except subprocess.CalledProcessError as e:
+            logger.error(f"7z extraction failed: {e.stderr.decode()}")
+            raise
 
-    # 5. Remove the temporary .7z file
-    os.remove(target_7z_path)
+        # 5. Remove the temporary .7z file
+        os.remove(target_7z_path)
 
-    # 6. Build paths for renaming
-    extracted_path = os.path.join(processing_base_folder, extracted_dirname)
-    target_path = os.path.join(processing_base_folder, dirname)
-    
-    # 7. Rename the extracted directory if target_dirname was specified and differs
-    if extracted_dirname != dirname:
-        logger.info(f"Renaming extracted directory from {extracted_dirname} to {dirname}")
-        if os.path.exists(target_path):
-            # Remove target if it already exists (shouldn't happen, but be safe)
-            logger.warning(f"Target directory {target_path} already exists, removing it")
-            shutil.rmtree(target_path)
-        os.rename(extracted_path, target_path)
-    
+        # 6. Build paths
+        extracted_path = os.path.join(local_extract_folder, extracted_dirname)
+        target_path = os.path.join(processing_base_folder, dirname)
+        if not os.path.isdir(extracted_path):
+            raise FileNotFoundError(f"Extracted directory {extracted_dirname} was not found after uncompressing {filename}")
+
+        # 7. Use the target directory name if target_dirname was specified and differs
+        if extracted_dirname != dirname:
+            logger.info(f"Renaming extracted directory from {extracted_dirname} to {dirname}")
+            if os.path.exists(target_path):
+                # Remove target if it already exists (shouldn't happen, but be safe)
+                logger.warning(f"Target directory {target_path} already exists, removing it")
+                shutil.rmtree(target_path)
+
+        # 8. Copy the extracted directory to the processing folder
+        logger.info(f"Copying extracted files to {target_path}")
+        copy_tree_files_only(extracted_path, target_path)
+    finally:
+        shutil.rmtree(local_extract_folder, ignore_errors=True)
+
     # Return the full path to the extracted directory
     return target_path
 
